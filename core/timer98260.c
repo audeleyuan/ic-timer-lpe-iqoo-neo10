@@ -2949,6 +2949,9 @@ int main(int argc, char **argv)
 
         logf("[main] setsid rc=%d errno=%d\n", sr, errno);
     }
+
+    if (argc > 1 && !strcmp(argv[1], "wait"))
+        return wait_child_main(argc > 2 ? argv[2] : "verify");
     signal(SIGHUP, SIG_IGN);
     signal(SIGINT, SIG_IGN);
     signal(SIGTERM, SIG_IGN);
@@ -3000,8 +3003,6 @@ int main(int argc, char **argv)
         }
         return ic_syms_parse_file(in, out, 1) == 0 ? 0 : 1;
     }
-    if (argc > 1 && !strcmp(argv[1], "wait"))
-        return wait_child_main(argc > 2 ? argv[2] : "verify");
 
     if (argc > 1 && !strcmp(argv[1], "shell"))
     {
