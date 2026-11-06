@@ -1458,6 +1458,15 @@ class MainActivity : ComponentActivity() {
                 }
             }
             addLog("[解析偏移]\n$out")
+            if (out.contains("is not 6.1.145")) {
+                postUi {
+                    Toast.makeText(
+                        this@MainActivity,
+                        "内核不是 6.1.145，已拒绝生成符号表",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
             busy = false
         }
     }

@@ -1553,6 +1553,16 @@ emit:
 			ok = 0;
 		}
 	}
+	/* This tool is only validated on 6.1.145 builds: link-time addresses of
+	 * a different minor kernel would be wrong in a way that turns a write
+	 * into an arbitrary kernel write.  Refuse instead of writing a table. */
+	if (ok && build[0] && !strstr(build, "6.1.145")) {
+		fprintf(stderr,
+			"[syms] kernel %s is not 6.1.145; refusing to write %s\n",
+			build, (out_path && strcmp(out_path, "-")) ? out_path
+								  : "stdout");
+		ok = 0;
+	}
 	if (ok) {
 		if (!write_table(out_path, tab, n, build, version))
 			ok = 0;
