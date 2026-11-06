@@ -1,14 +1,13 @@
-# IC Timer LPE —— CVE-2026-98260（refactor-98260 分支，0.12.x）
+# IC Timer LPE —— CVE-2026-98260
 
 POSIX CPU timer UAF（CVE-2026-98260）的 vivo/iQOO 6.1 提权工具：从 shell 域
 拿到 uid 0，并可把 root 交给 KernelSU 系列管理器（late-load 管理器自带的
 `ksud` / 内核模块）。
 
-**本分支是重构版（0.12.x），不合并 `main`。** `main` 停在 0.11.67。
-
+> 仅供学习使用，请下载后24内删除。如设备出现任何问题，概不负责。
 > 本软件免费开源，作者酷安 **@散花神木**
 
-## 0.12 重构做了什么
+## 0.12 做了什么
 
 旧版把每台机器/每个 build 的偏移、喷页几何、slide 方式都写死在主文件里，
 一个内核改动就要重新编译。0.12 拆成：
@@ -82,4 +81,4 @@ cd apk && sh build.sh                     # SDK build-tools 34 + Shizuku jars
 
 - 真机文件系统布局、不同 build 的 `struct cred` 偏移按已知 build 推导，未
   实测的 build 失败时表现为 `fork/exec errno=12`（ENOMEM），不会 panic；
-- 本分支不包含 5.10 机型。
+- 本分支仅适用于 6.1.145 内核的机型。
