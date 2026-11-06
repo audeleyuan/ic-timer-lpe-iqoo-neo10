@@ -23,7 +23,20 @@ echo "[core] device=$(getprop ro.product.device 2>/dev/null) model=$(getprop ro.
 echo "[core] build=$(getprop ro.build.display.id 2>/dev/null)"
 echo "[core] memtotal=$(sed -n 's/^MemTotal:[[:space:]]*\([0-9]*\).*/\1/p' /proc/meminfo 2>/dev/null) kB"
 
-"$BIN" 2>&1
+# KSU handoff: the App prepends its handoff script to PAYLOAD_CMD when a
+# manager is selected.  Late-loading the manager's kernel module needs root
+# with the full capability set, which is the fake-cred endgame ("ksu" mode);
+# the shell path only reaches uid 0 inside u:r:shell:s0 without caps.
+MODE=
+case "${PAYLOAD_CMD:-}" in
+    *ksu_handoff*) MODE=ksu ;;
+esac
+if [ -n "$MODE" ]; then
+    echo "[core] mode=ksu payload=$(echo "${PAYLOAD_CMD:-}" | head -c 80)"
+    "$BIN" "$MODE" 2>&1
+else
+    "$BIN" 2>&1
+fi
 rc=$?
 echo "[core] exit=$rc"
 exit "$rc"

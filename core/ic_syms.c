@@ -102,6 +102,9 @@ const char *const ic_syms_required[] = {
 	"selinux_state",
 	"init_user_ns",
 	"init_cred",
+	"root_user",
+	"init_ucounts",
+	"init_groups",
 	NULL
 };
 
