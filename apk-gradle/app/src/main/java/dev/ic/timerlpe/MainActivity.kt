@@ -1495,6 +1495,7 @@ class MainActivity : ComponentActivity() {
                         },
                         colors = ButtonDefaults.textButtonColorsPrimary()
                     )
+                    Spacer(Modifier.height(8.dp))
                     TextButton(
                         modifier = Modifier.fillMaxWidth(),
                         text = "连管理器一起卸载",
@@ -1503,6 +1504,7 @@ class MainActivity : ComponentActivity() {
                             s?.let { doCleanup(it, true) }
                         }
                     )
+                    Spacer(Modifier.height(8.dp))
                     TextButton(
                         modifier = Modifier.fillMaxWidth(),
                         text = "取消",
@@ -1535,6 +1537,7 @@ class MainActivity : ComponentActivity() {
                         },
                         colors = ButtonDefaults.textButtonColorsPrimary()
                     )
+                    Spacer(Modifier.height(8.dp))
                     TextButton(
                         modifier = Modifier.fillMaxWidth(),
                         text = "取消",
