@@ -7,7 +7,7 @@
 | 来源 | 关键做法 |
 | --- | --- |
 | `kzktor/ic-timer-lpe` main | 现有 A/B/candidate 链、slide、mcast、KSU 交接 |
-| TimerRoot.apk（6.6/6.18） | BTF 取偏移；最多 12 次 attempt；trace 校验 `free_seen=1 + burst hit=1` 才 reap；rootd socket |
+| [kpgc10kai/TimerRoot](https://github.com/kpgc10kai/TimerRoot)（6.6/6.18） | BTF 取偏移；最多 12 次 attempt；trace 校验 `free_seen=1 + burst hit=1` 才 reap；rootd socket |
 | `whooslizi/infinitycore-x200pro` | v2 verify-and-repair（/proc/self/status 回读重写）；v4 pre-zombie free watcher（异核 drain exec 核 raw ring，按 pfn 匹配，命中即放 phase2）；v5 全核 watcher + harvest；一次 boot 一次尝试 |
 | `molanp/CVE-2026-98260-vivo-s60-poc` | 两段式喷：phase1 在 exec 前，phase2 由 victim pfn free 触发；`scan_page_alloc_ours` 同时校验 pfn 与喷线程 tid；raw 扫描布局 type@i-8 / pid@i-4 / pfn@i / order@i+8 |
 | `nisu123f/dada-cve-AN00` | 5.10.236-android12-9 profile：`task->cred=0x780`、`real_cred=0x778`、`comm=0x790`、cred `copy_size=168`、`caps@40`、`user/user_ns/group_info @ 128/136/144`、`init_cred` 等离线地址 |
