@@ -298,6 +298,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        refreshAuth()
+        if (authorized && !bound) bindUserService()
+        refreshStaticState()
+    }
+
     /* ------------------------------------------------------------------ */
     /* Home                                                                */
     /* ------------------------------------------------------------------ */
