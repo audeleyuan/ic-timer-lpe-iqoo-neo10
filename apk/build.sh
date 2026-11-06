@@ -1,10 +1,12 @@
-﻿#!/bin/sh
+#!/bin/sh
 # Build the Shizuku-backed APK for the IC POSIX timer LPE.
 # Plain SDK tools only (aapt2 / aidl / d8 / zipalign / apksigner): no Gradle,
 # so the build stays offline and reproducible on this machine.
 set -eu
 
-ROOT=D:/kwork/icapk
+ROOT=D:/kwork/icv11/apk
+VCODE=90
+VNAME=0.11.67
 SDK=D:/Android/Sdk
 BT=$SDK/build-tools/34.0.0
 AJ=$SDK/platforms/android-34/android.jar
@@ -43,11 +45,18 @@ echo "== d8"
     "$SHZ/aidl/classes.jar" "$SHZ/shared/classes.jar"
 
 echo "== aapt2 link"
+# aapt2's --version-code/--version-name do NOT override values already in the
+# manifest, so the manifest is rewritten from VCODE/VNAME first.  Every build
+# before 0.11.41 shipped the stale "47 / 0.11.24" pair for exactly that reason.
+sed -e "s/android:versionCode=\"[0-9]*\"/android:versionCode=\"$VCODE\"/" \
+    -e "s/android:versionName=\"[^\"]*\"/android:versionName=\"$VNAME\"/" \
+    "$ROOT/AndroidManifest.xml" > "$OUT/AndroidManifest.gen.xml"
+grep -n "android:versionCode\|android:versionName" "$OUT/AndroidManifest.gen.xml"
 "$BT/aapt2.exe" link -o "$OUT/apk/base.apk" \
-    --manifest "$ROOT/AndroidManifest.xml" \
+    --manifest "$OUT/AndroidManifest.gen.xml" \
     -I "$AJ" -A "$ROOT/assets" \
     --min-sdk-version 24 --target-sdk-version 34 \
-    --version-code 22 --version-name 0.10.6
+    --version-code "$VCODE" --version-name "$VNAME"
 
 echo "== add dex"
 "$JDK/bin/jar" --update --file "$OUT/apk/base.apk" -C "$OUT/dex" classes.dex
@@ -65,9 +74,9 @@ fi
 "$JAVA" -jar "$BT/lib/apksigner.jar" sign \
     --ks "$ROOT/debug.keystore" --ks-pass pass:android \
     --key-pass pass:android \
-    --out "$OUT/ic-timer-lpe-0.10.6.apk" "$OUT/apk/aligned.apk"
+    --out "$OUT/ic-timer-lpe-0.11.66.apk" "$OUT/apk/aligned.apk"
 
 echo "== verify"
 "$JAVA" -jar "$BT/lib/apksigner.jar" verify --print-certs \
-    "$OUT/ic-timer-lpe-0.10.6.apk" | head -4
-ls -l "$OUT/ic-timer-lpe-0.10.6.apk"
+    "$OUT/ic-timer-lpe-0.11.66.apk" | head -4
+ls -l "$OUT/ic-timer-lpe-0.11.66.apk"

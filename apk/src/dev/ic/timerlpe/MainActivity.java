@@ -1,10 +1,13 @@
 package dev.ic.timerlpe;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ComponentName;
+import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
 import android.graphics.Typeface;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
@@ -13,6 +16,7 @@ import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Spinner;
@@ -31,6 +35,7 @@ import rikka.shizuku.Shizuku;
  */
 public class MainActivity extends Activity {
     private static final int REQ = 1001;
+    private static final int REQ_PICK = 2001;
     private static final String TMP = "/data/local/tmp/";
     private static final int CHUNK = 128 * 1024;
     private static final String DEFAULT_CMD =
@@ -64,8 +69,12 @@ public class MainActivity extends Activity {
     private TextView log;
     private ScrollView scroll;
     private Spinner ksuView;
+    private CheckBox safeView;
+    private CheckBox oracleView;
     private Button connectBtn;
     private Button runBtn;
+    private Button parseBtn;
+    private Button cleanBtn;
 
     private IIcService svc;
     private boolean bound;
@@ -146,7 +155,7 @@ public class MainActivity extends Activity {
         root.setPadding(p, p, p, p);
 
         TextView title = new TextView(this);
-        title.setText("IC Timer LPE  (PD2506)");
+        title.setText("IC Timer LPE  (vivo/iQOO 6.1.145)");
         title.setTextSize(18);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         root.addView(title);
@@ -160,7 +169,9 @@ public class MainActivity extends Activity {
         warn.setTextSize(12);
         warn.setText("规则：每次完整运行前重启手机；运行后残留的 ic-timer 进程"
                 + "不能 kill -9，只能重启清理。接管 KSU 需要先装好对应管理器"
-                + "的 APK（管理器自身的内核模块由 late-load 加载）。");
+                + "的 APK（管理器自身的内核模块由 late-load 加载）。\n"
+                + "Y500 / iQOO 12 / X100s Pro 已内置偏移（机型+版本匹配）；其他 build 点“解析偏移”用系统"
+                + "文件选择器选 boot.img。");
         root.addView(warn);
 
         LinearLayout row = new LinearLayout(this);
@@ -183,6 +194,20 @@ public class MainActivity extends Activity {
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         root.addView(row);
 
+        LinearLayout tools = new LinearLayout(this);
+        tools.setOrientation(LinearLayout.HORIZONTAL);
+        parseBtn = new Button(this);
+        parseBtn.setText("解析偏移");
+        parseBtn.setOnClickListener(v -> parseOffsets());
+        cleanBtn = new Button(this);
+        cleanBtn.setText("清理 KSU");
+        cleanBtn.setOnClickListener(v -> cleanup());
+        tools.addView(parseBtn, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        tools.addView(cleanBtn, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        root.addView(tools);
+
         LinearLayout ksuRow = new LinearLayout(this);
         ksuRow.setOrientation(LinearLayout.HORIZONTAL);
         TextView ksuLabel = new TextView(this);
@@ -200,6 +225,16 @@ public class MainActivity extends Activity {
         ksuRow.addView(ksuView, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         root.addView(ksuRow);
+
+        safeView = new CheckBox(this);
+        safeView.setTextSize(12);
+        safeView.setText("安全模式：提权时禁用全部 KSU 模块");
+        root.addView(safeView);
+
+        oracleView = new CheckBox(this);
+        oracleView.setTextSize(12);
+        oracleView.setText("强制 oracle：跳过硬编码探针，用 trace 页记录判定（实验）");
+        root.addView(oracleView);
 
         scroll = new ScrollView(this);
         log = new TextView(this);
@@ -278,9 +313,14 @@ public class MainActivity extends Activity {
             String out;
             try {
                 out = s.runCmd("id; cat /proc/self/attr/current; getenforce; "
+                        + "echo ---; uname -r; "
+                        + "getprop ro.product.device; getprop ro.product.model; "
                         + "echo ---; ls -l /data/local/tmp/ | head -20; "
+                        + "echo ---; head -n 2 /data/local/tmp/ic-syms.txt "
+                        + "2>/dev/null; ls -d /data/adb/ksu 2>/dev/null; "
                         + "echo ---; pm list packages 2>/dev/null | "
-                        + "grep -Ei 'kernelsu|sukisu|resukisu|bakasu|sakisu'");
+                        + "grep -Ei 'kernelsu|sukisu|resukisu|bakasu|sakisu|"
+                        + "sevenk|vivoksu|ksunext|fina'");
             } catch (Throwable t) {
                 out = "诊断失败: " + t;
             }
@@ -303,6 +343,8 @@ public class MainActivity extends Activity {
         final String scheme = SCHEME_ASSET;
         final int ksuIdx = ksuView.getSelectedItemPosition();
         final String ksuPkg = KSU_PKGS[ksuIdx];
+        final boolean safe = safeView.isChecked();
+        final boolean forceOracle = oracleView.isChecked();
 
         // A new copy every run: truncating the ELF that parked attempts still
         // execute would SIGBUS them, and a dying attempt walks a rewritten
@@ -313,17 +355,31 @@ public class MainActivity extends Activity {
         final String logFile = TMP + "ic-app-a" + stamp + ".log";
         final String handoff = ksuPkg == null
                 ? null : TMP + "ksu-h" + stamp + ".sh";
+        // With KSU handoff on, the handoff script applies safe mode itself as
+        // root.  With handoff off, run safemode.sh in the payload instead: the
+        // helper is the only process that has root before KSU.
+        final String safeScript = (safe && handoff == null)
+                ? TMP + "ic-safe-h" + stamp + ".sh" : null;
         // The handoff runs first as root, then the user's proof command; ';'
         // keeps the proof running even when the handoff fails.  An empty
         // package means "let the script auto-detect the manager".
-        String pl = ksuPkg == null ? cmd
-                : "sh " + handoff + " '" + ksuPkg + "' '' ; " + cmd;
+        String pl;
+        if (handoff != null)
+            pl = "sh " + handoff + " '" + ksuPkg + "' '' '"
+                    + (safe ? "1" : "0") + "' ; " + cmd;
+        else if (safeScript != null)
+            pl = "sh " + safeScript + " ; " + cmd;
+        else
+            pl = cmd;
         // The launcher asset owns the whole plan: it computes this boot's
         // KASLR slide with the binary's own `slide` mode, always disarms vr.ko
         // with a zero-write when the module is loaded *before* the chain
         // releases the fake-cred winner (the X300/t28 ordering), and makes
         // SELinux permissive only on a stock device.
         final String payload = pl;
+        final String extraEnv = "IC_SYMS_FILE=/data/local/tmp/ic-syms.txt"
+                + (safe ? "\nIC_SAFE_MODE=1" : "")
+                + (forceOracle ? "\nIC_FORCE_ORACLE=1" : "");
 
         runBtn.setEnabled(false);
         new Thread(() -> {
@@ -355,9 +411,15 @@ public class MainActivity extends Activity {
                     push(s, "ksu_handoff.sh", handoff);
                     s.makeExec(handoff);
                 }
+                if (safeScript != null) {
+                    s.truncate(safeScript);
+                    push(s, "safemode.sh", safeScript);
+                    s.makeExec(safeScript);
+                }
 
                 s.truncate(logFile);
-                String r = s.start(script, bin, logFile, att, payload);
+                String r = s.start(script, bin, logFile, att, payload,
+                        extraEnv);
                 ui.post(() -> {
                     append("[run] 方案: " + scheme
                             + "  KSU: " + KSU_NAMES[ksuIdx]
@@ -375,6 +437,136 @@ public class MainActivity extends Activity {
                 });
             }
         }, "runner").start();
+    }
+
+    /* "解析偏移" opens the system document picker (SAF), copies the chosen
+     * boot.img into /data/local/tmp through the Shizuku service, and runs
+     * `ic-timer syms` on it.  This is optional: Y500, iQOO 12 and the
+     * gf506252 PD2506 build already carry their tables in the binary.  The
+     * PC-side tool/parse_offsets.py also accepts a full OTA zip. */
+    private void parseOffsets() {
+        if (svc == null) {
+            append("服务未连接：先点“连接 Shizuku”");
+            return;
+        }
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("*/*");
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        try {
+            startActivityForResult(i, REQ_PICK);
+        } catch (Throwable t) {
+            append("[解析偏移] 无法打开文件选择器: " + t);
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int req, int res, Intent data) {
+        super.onActivityResult(req, res, data);
+        if (req != REQ_PICK)
+            return;
+        if (res != RESULT_OK || data == null || data.getData() == null) {
+            append("[解析偏移] 已取消");
+            return;
+        }
+        Uri uri = data.getData();
+        try {
+            getContentResolver().takePersistableUriPermission(uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (Throwable ignored) { }
+        doParseSelected(uri);
+    }
+
+    private void doParseSelected(final Uri uri) {
+        final IIcService s = svc;
+        if (s == null) {
+            append("服务未连接：先点“连接 Shizuku”");
+            return;
+        }
+        parseBtn.setEnabled(false);
+        new Thread(() -> {
+            String out;
+            try {
+                String stamp = Long.toString(System.currentTimeMillis() / 1000);
+                String bin = TMP + "ic-syms-a" + stamp;
+                String img = TMP + "ic-boot-a" + stamp + ".img";
+                String syms = TMP + "ic-syms.txt";
+                s.truncate(bin);
+                push(s, "ic-timer", bin);
+                s.makeExec(bin);
+                s.truncate(img);
+                InputStream in = getContentResolver().openInputStream(uri);
+                if (in == null)
+                    throw new IllegalStateException("openInputStream returned null");
+                int off = 0;
+                byte[] buf = new byte[CHUNK];
+                try {
+                    int n;
+                    while ((n = in.read(buf)) > 0) {
+                        byte[] chunk = (n == buf.length)
+                                ? buf : Arrays.copyOf(buf, n);
+                        s.put(img, off, chunk);
+                        off += n;
+                    }
+                } finally {
+                    in.close();
+                }
+                out = "已选择: " + uri.getLastPathSegment()
+                        + " (" + off + " bytes)\n";
+                out += s.runCmd("ls -l " + img + " 2>&1; "
+                        + bin + " syms " + img + " " + syms + " 2>&1; "
+                        + "echo parse_rc=$?; "
+                        + "sed -n '1,3p' " + syms + " 2>/dev/null; "
+                        + "rm -f " + img);
+            } catch (Throwable t) {
+                out = "解析失败: " + t;
+            }
+            final String f = out;
+            ui.post(() -> {
+                append("[解析偏移]\n" + f);
+                parseBtn.setEnabled(true);
+            });
+        }, "syms").start();
+    }
+
+    private void cleanup() {
+        final IIcService s = svc;
+        if (s == null) {
+            append("服务未连接：先点“连接 Shizuku”");
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("清理 KernelSU")
+                .setMessage("删除 /data/adb/ksu、/data/adb/modules、"
+                        + "/data/adb/modules_update 等 KSU 文件，并清理本工具的"
+                        + "临时文件。管理器 APK 默认保留。\n\n"
+                        + "已加载的内核模块要重启后才消失；清理后请重启再提权。")
+                .setPositiveButton("清理(保留管理器)",
+                        (d, w) -> doCleanup(s, false))
+                .setNeutralButton("连管理器一起卸载",
+                        (d, w) -> doCleanup(s, true))
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void doCleanup(final IIcService s, final boolean apk) {
+        new Thread(() -> {
+            String out;
+            try {
+                String stamp = Long.toString(System.currentTimeMillis() / 1000);
+                String script = TMP + "ic-clean-a" + stamp + ".sh";
+                s.truncate(script);
+                push(s, "cleanup.sh", script);
+                s.makeExec(script);
+                out = s.runCmd("sh " + script + " --logs"
+                        + (apk ? " --apk" : "") + " 2>&1");
+            } catch (Throwable t) {
+                out = "清理失败: " + t;
+            }
+            final String f = out;
+            ui.post(() -> append("[清理]\n" + f));
+        }, "cleanup").start();
     }
 
     private void push(IIcService s, String asset, String dst) throws Exception {

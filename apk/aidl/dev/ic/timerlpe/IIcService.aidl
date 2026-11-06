@@ -18,7 +18,9 @@ interface IIcService {
     int length(String path);
     byte[] read(String path, int offset, int max);
 
-    // Start `sh <script>` with IC_BIN/ATTEMPTS/PAYLOAD_CMD in its environment,
-    // appending stdout+stderr to <log>.
-    String start(String script, String bin, String log, int attempts, String payloadCmd);
+    // Start `sh <script>` with IC_BIN/ATTEMPTS/PAYLOAD_CMD plus any
+    // newline-separated K=V pairs in extraEnv, appending stdout+stderr to
+    // <log>.
+    String start(String script, String bin, String log, int attempts,
+                 String payloadCmd, String extraEnv);
 }

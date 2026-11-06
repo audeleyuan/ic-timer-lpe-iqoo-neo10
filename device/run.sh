@@ -10,6 +10,48 @@
 # whose payload hands root to the KSU manager.
 D=${KIT_DIR:-/data/local/tmp/ic-kit}
 BIN="$D/ic-timer"
+# adbd/Shizuku may disappear when USB debugging is toggled; do not let a
+# closed log pipe kill the script or a parked attempt.
+trap '' PIPE HUP INT TERM
+# Make this script its own session leader before it execs the exploit, so an
+# adbd process-group kill cannot reach the plan.  The APK path is already
+# started with setsid by IcService.
+if [ "${IC_DETACHED:-0}" != "1" ] && command -v setsid >/dev/null 2>&1; then
+	export IC_DETACHED=1
+	exec setsid sh "$0" "$@"
+fi
+
+# Universal target gate: vivo/iQOO 6.1.145.  A different build needs its own
+# symbol table (ic-syms.txt) or slide would aim at the wrong addresses.
+KERNEL=$(uname -r 2>/dev/null)
+case "$KERNEL" in
+*6.1.145*) ;;
+*) [ "${IC_ALLOW_ANY_KERNEL:-0}" = 1 ] || {
+	echo "[run] kernel '$KERNEL' is not 6.1.145; refusing"
+	exit 4
+};;
+esac
+DEVID="$(getprop ro.product.manufacturer 2>/dev/null) $(getprop ro.product.brand 2>/dev/null) $(getprop ro.product.model 2>/dev/null) $(getprop ro.product.device 2>/dev/null)"
+DEVL=$(printf '%s' "$DEVID" | tr 'A-Z' 'a-z')
+case "$DEVL" in
+*vivo*|*iqoo*|*v2*|*pd2*|*pd3*) ;;
+*) [ "${IC_DEVICE_ANY:-0}" = 1 ] || {
+	echo "[run] device '$DEVID' is not vivo/iQOO; refusing"
+	exit 4
+};;
+esac
+export IC_DEVICE_VIVO=1
+export IC_DEVICE_MODEL="$(getprop ro.product.device 2>/dev/null):$(getprop ro.product.model 2>/dev/null)"
+export IC_BUILD_VERSION="$(getprop ro.build.display.id 2>/dev/null)"
+SYMS="${IC_SYMS_FILE:-$D/ic-syms.txt}"
+if [ -f "$SYMS" ]; then
+	export IC_SYMS_FILE="$SYMS"
+	echo "[run] syms=$SYMS build=$(sed -n 's/^# build=//p' "$SYMS" | head -n 1)"
+else
+	unset IC_SYMS_FILE 2>/dev/null || true
+	echo "[run] syms=builtin (no $SYMS)"
+fi
+
 FUNCS_ADDR=""
 SELINUX_STATE=""
 INIT_USER_NS=""
