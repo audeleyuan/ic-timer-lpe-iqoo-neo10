@@ -114,3 +114,21 @@
   作为指针替换成功的判据。
 - 离线 fake 全链尚未稳定跑绿（shell 路径已稳定），QEMU 下每次 attempt
   约 40 s，需要更长预算；真机不受这个吞吐限制。
+
+## 里程碑 5（2026-11-06）：fake/KSU 路径离线跑通
+
+- 之前 fake_cred 报 8/8 miss 是**校验看错了指针**：`/proc/<pid>/status` 的
+  Uid 来自 `task->real_cred`（0x830），fake plant 换的是 `task->cred`
+  （0x838）；fork 归一化之前两者分叉，回读永远看到 2000。
+- 改为 peek 协议：wait_child_main 在 fake/fullshell/diag 模式下每收到 1
+  字节就回报一次 `getuid()/geteuid()`，只有收到 `G` 才继续执行；父进程用
+  `poke_child()` 读取。fake_cred 以“uid != 调用者 uid”判定替换成功，
+  fake_uid 以 uid==0 判定零写落地。
+- 新增 fake_euid 阶段：fake 节点 `rb_left` 与 cred+0x10（sgid/euid）重叠，
+  euid 残留 target 指针高半（0xffffff80），需再零写一次 fc.A+0x14。
+- 结尾的 `G` 也会产生一个 8 字节 peek 回包，先 poll/read 掉，否则会和
+  child report 粘连导致 magic 校验失败。
+- QEMU 6.1.145 + enforcing shell 域结果：
+  `fake cred A=...` → `fake_uid` → `fake_euid` 均一次通过 →
+  child `uid=0 euid=0` → `/system/bin/sh` 替身
+  `[qsh] uid=0 euid=0 resuid=0/0/0 ... ROOT_SHELL_OK`。

