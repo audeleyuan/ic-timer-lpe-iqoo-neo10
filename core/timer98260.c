@@ -1879,19 +1879,24 @@ static void run_plant(unsigned long long target, int tag, int mode,
             /* Prefer the external table's symbols (any build) over the
              * profile constants; the slide is already known here. */
             *(unsigned long long *)(payload + off + OFF_CRED_USER) =
-                (g_root_user_link ? g_root_user_link : ROOT_USER_STATIC) +
+                (g_root_user_link
+                     ? g_root_user_link
+                     : (g_static_ok ? ROOT_USER_STATIC : 0)) +
                 g_slide;
             *(unsigned long long *)(payload + off + OFF_CRED_USER_NS) =
-                (g_init_user_ns_link ? g_init_user_ns_link
-                                     : INIT_USER_NS_STATIC) +
+                (g_init_user_ns_link
+                     ? g_init_user_ns_link
+                     : (g_static_ok ? INIT_USER_NS_STATIC : 0)) +
                 g_slide;
             *(unsigned long long *)(payload + off + OFF_CRED_UCOUNTS) =
-                (g_init_ucounts_link ? g_init_ucounts_link
-                                     : INIT_UCOUNTS_STATIC) +
+                (g_init_ucounts_link
+                     ? g_init_ucounts_link
+                     : (g_static_ok ? INIT_UCOUNTS_STATIC : 0)) +
                 g_slide;
             *(unsigned long long *)(payload + off + OFF_CRED_GROUP_INFO) =
-                (g_init_groups_link ? g_init_groups_link
-                                    : INIT_GROUPS_STATIC) +
+                (g_init_groups_link
+                     ? g_init_groups_link
+                     : (g_static_ok ? INIT_GROUPS_STATIC : 0)) +
                 g_slide;
             *(unsigned int *)(payload + blob + SELINUX_BLOB_OFF) =
                 SELINUX_SID_KERNEL;
@@ -3135,6 +3140,9 @@ int main(int argc, char **argv)
 
             logf("[syms] %s -> %d (tp=%#llx selinux=%#llx)\n", sf, sn,
                  g_tp_link, g_selinux_link);
+            logf("[syms] have ru=%#llx ns=%#llx uc=%#llx gi=%#llx cred=%#llx\n",
+                 g_root_user_link, g_init_user_ns_link, g_init_ucounts_link,
+                 g_init_groups_link, g_init_cred_link);
         }
     }
 
@@ -3282,7 +3290,7 @@ int main(int argc, char **argv)
 
         if (!g_static_ok &&
             !(g_selinux_link && g_root_user_link && g_init_user_ns_link &&
-              g_init_groups_link && g_tp_link))
+              g_init_ucounts_link && g_init_groups_link && g_tp_link))
         {
             /* The fake endgame needs the per-build selinux_state / init_*
              * / TP addresses.  Either the profile matches or an external
