@@ -3036,6 +3036,8 @@ int main(int argc, char **argv)
             {
                 g_tp_link = tab->link[IC_ANCHOR_N - 4];
                 g_selinux_link = tab->link[IC_ANCHOR_N - 3];
+                if (!g_init_user_ns_link)
+                    g_init_user_ns_link = tab->link[IC_ANCHOR_N - 2];
                 if (!g_init_cred_link)
                     g_init_cred_link = tab->link[IC_ANCHOR_N - 1];
                 /* Fill the fake-cred objects the anchor tables lack, when
