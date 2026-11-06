@@ -15,5 +15,5 @@ OUT=${1:-$ROOT/t98260}
 PROFILE=$(echo "${2:-pd2571}" | tr '[:lower:]' '[:upper:]')
 CC=${CC:-${ANDROID_NDK_HOME:-/d/Android/Sdk/ndk/27.2.12479018}/toolchains/llvm/prebuilt/windows-x86_64/bin/aarch64-linux-android29-clang}
 "$CC" -O2 -static -pthread -Wall -Wextra -DIC_PROFILE_"$PROFILE" \
-    "$ROOT/timer98260.c" -o "$OUT"
+    -DIC_SYMS_HAVE_ZLIB "$ROOT/timer98260.c" "$ROOT/ic_syms.c" -lz -o "$OUT"
 echo "built $OUT (profile $PROFILE)"

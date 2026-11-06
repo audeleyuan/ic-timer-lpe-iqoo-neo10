@@ -92,6 +92,7 @@
  * link base shifts every static address consistently and cancels out.
  */
 #include "profiles.h"
+#include "ic_syms.h"
 static int g_timer_site_kind = 0;
 /* Runtime-detected do_timer_create call site.  The low 21 bits are a
  * per-build constant (the KASLR slide is 2 MiB aligned and does not touch
@@ -2812,6 +2813,22 @@ int main(int argc, char **argv)
         }
         else
             logf("[ksym] implausible _text slide %#llx; ignoring\n", sl);
+    }
+    /* `core syms <image> [out]` -- parse a boot.img / Image / vmlinux /
+     * System.map into the external table the de-tag path reads.  This is the
+     * old tool's on-device "parse offsets" flow, ported with ic_syms.c. */
+    if (argc > 1 && !strcmp(argv[1], "syms"))
+    {
+        const char *in = argc > 2 ? argv[2] : NULL;
+        const char *out = argc > 3 ? argv[3] : "/data/local/tmp/ic-syms.txt";
+
+        if (!in)
+        {
+            logf("usage: %s syms <boot.img|Image|vmlinux|System.map> [out]\n",
+                 argv[0]);
+            return 2;
+        }
+        return ic_syms_parse_file(in, out, 1) == 0 ? 0 : 1;
     }
     if (argc > 1 && !strcmp(argv[1], "wait"))
         return wait_child_main(argc > 2 ? argv[2] : "verify");
