@@ -70,7 +70,6 @@ public class MainActivity extends Activity {
     private ScrollView scroll;
     private Spinner ksuView;
     private CheckBox safeView;
-    private CheckBox oracleView;
     private Button connectBtn;
     private Button runBtn;
     private Button parseBtn;
@@ -231,11 +230,6 @@ public class MainActivity extends Activity {
         safeView.setText("安全模式：提权时禁用全部 KSU 模块");
         root.addView(safeView);
 
-        oracleView = new CheckBox(this);
-        oracleView.setTextSize(12);
-        oracleView.setText("强制 oracle：跳过硬编码探针，用 trace 页记录判定（实验）");
-        root.addView(oracleView);
-
         scroll = new ScrollView(this);
         log = new TextView(this);
         log.setTextSize(10);
@@ -344,7 +338,6 @@ public class MainActivity extends Activity {
         final int ksuIdx = ksuView.getSelectedItemPosition();
         final String ksuPkg = KSU_PKGS[ksuIdx];
         final boolean safe = safeView.isChecked();
-        final boolean forceOracle = oracleView.isChecked();
 
         // A new copy every run: truncating the ELF that parked attempts still
         // execute would SIGBUS them, and a dying attempt walks a rewritten
@@ -378,8 +371,7 @@ public class MainActivity extends Activity {
         // SELinux permissive only on a stock device.
         final String payload = pl;
         final String extraEnv = "IC_SYMS_FILE=/data/local/tmp/ic-syms.txt"
-                + (safe ? "\nIC_SAFE_MODE=1" : "")
-                + (forceOracle ? "\nIC_FORCE_ORACLE=1" : "");
+                + (safe ? "\nIC_SAFE_MODE=1" : "");
 
         runBtn.setEnabled(false);
         new Thread(() -> {
