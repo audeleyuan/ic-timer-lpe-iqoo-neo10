@@ -85,3 +85,17 @@
   `IC_LOG_PATH`（无则 `/dev/ic-out`）重定向 stdout/stderr。
 - 唯一未走完的一步是 `/system/bin/sh` 在 initramfs 中不存在（ENOENT）；
   真机上此步即 landing。
+
+## 里程碑 3（2026-11-06）：命中校验 + 落地验证
+
+- 发现 `free_seen=1 burst hit=1` 只证明喷页接住了，不能证明 reap 时的
+  `rb_erase` 真的走到了我们的 target（killer 输掉竞争时节点早被 de_thread
+  正常摘除，plant 仍报 ok 但一个字节都没写）。shell 路径现在每次 plant 后
+  读 `/proc/<child>/status` 的 Uid 回读校验，未命中就重发，最多 8 次；
+  只有校验通过才继续，避免"全绿但 uid 还是 2000"。
+- 修掉成功门槛的假阴性：`rep.euid` 是唤醒前的快照（恒为 2000），门槛改看
+  setuid(0) 之后的 `rep.reuid`。
+- 离线落地：initramfs 里放一个 `/system/bin/sh` 替身，在 enforcing 的
+  shell 域里拿到
+  `[qsh] uid=0 euid=0 resuid=0/0/0 ctx=u:r:shell:s0 ... ROOT_SHELL_OK`。
+  真机上这一步就是 exec 真实 shell / KSU 交接。
