@@ -1,0 +1,35 @@
+IC Timer LPE
+============
+
+Copyright (C) 2026 酷安@散花神木 and contributors
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.  See LICENSE.
+
+The APK's user interface (Jetpack Compose structure: tab scaffolding, bottom
+navigation, blurred bars, status/info cards, preference rows, manual markdown
+renderer) is ported from:
+
+  Yunnijian/Shark  https://github.com/Yunnijian/Shark
+  Licensed under the GNU General Public License v3.0.
+
+Other referenced projects (code ideas / offsets / PoCs):
+
+  molanp/CVE-2026-98260-vivo-s60-poc   MIT
+  woshigenm/CVE-2026-98260             MIT
+  whooslizi/infinitycore-x200pro       GPL-3.0
+  nisu123f/dada-cve-AN00               (see upstream)
+  kpgc10kai/TimerRoot                  (see upstream)
+
+Third-party libraries used by the APK:
+
+  Jetpack Compose (androidx.compose.*)        Apache-2.0
+  AndroidX Activity / Lifecycle / Core        Apache-2.0
+  Kotlin standard library, kotlinx.coroutines Apache-2.0
+  COUI (io.github.suqi8.coui.kmp)             Apache-2.0
+  Shizuku (dev.rikka.shizuku)                 Apache-2.0
+
+Full license texts are bundled in the app under the "开放源代码许可" page
+(app/src/main/assets/licenses/).

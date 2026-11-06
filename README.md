@@ -35,6 +35,24 @@ POSIX CPU timer UAF（CVE-2026-98260）的 vivo/iQOO 6.1 提权工具：从 shel
 - **写后校验**：shell 路径回读 `/proc/<child>/status` 的 Uid，fake 路径用
   peek 协议让 child 自报 `getuid()/geteuid()`，未命中就重发（≤8 次）。
 
+## 0.13 做了什么
+
+界面从手写 framework View 换成 **移植 Shark 的 Jetpack Compose 界面**
+（[Yunnijian/Shark](https://github.com/Yunnijian/Shark)，GPL-3.0）：
+
+- 工程切到 Gradle + Kotlin + Compose（`apk-gradle/`，旧 `apk/` 保留作参照）；
+- 底部三页：首页 / 日志 / 关于，沿用 Shark 的 `COUITheme`、`Scaffold`、
+  `AnimatedContent`、模糊标题栏与卡片组件；
+- 首页：状态卡、一键越狱、ROOT 管理器下拉、安全模式开关、解析偏移 /
+  清理 KSU / 诊断、设备信息卡，使用手册直接渲染在首页底部；
+- 日志页实时滚动（清空按钮在标题栏）；关于页为源码 / 社群 / 问题反馈、
+  赞赏码与开放源代码许可；
+- 后端替换为本站的 Shizuku 用户服务（`IcService` + `run_core.sh`），
+  `IC_SYMS_FILE` / `IC_SAFE_MODE` / `IC_KSU` 行为与 0.12 一致。
+
+移植自 Shark 的界面代码使本项目整体按 **GPL-3.0** 分发，见 `LICENSE` 与
+`NOTICE`。
+
 ## 支持机型（内置偏移，机型 + 版本匹配）
 
 | 机型 | 版本 |
@@ -64,8 +82,11 @@ POSIX CPU timer UAF（CVE-2026-98260）的 vivo/iQOO 6.1 提权工具：从 shel
 ```sh
 core/build.sh /tmp/t98260 qemu_iqoo12     # NDK r27, API 29（API 24 的 TLS
                                           # 对齐会被 bionic 拒绝）
-cd apk && sh build.sh                     # SDK build-tools 34 + Shizuku jars
+cp core/out/qemu_iqoo12/ic-timer apk-gradle/app/src/main/assets/ic-timer
+cd apk-gradle && ./gradlew :app:assembleRelease   # AGP 9.4.1 / Kotlin 2.4.20
 ```
+
+`apk/`（javac + framework View）是 0.12 及以前的手工构建，留作参照。
 
 `core/tools/gen_anchors.py <Image>` 从内核镜像生成/更新 anchor 表；
 `core/tools/verify_tables.py core/anchors.h dist/` 做交叉核对。

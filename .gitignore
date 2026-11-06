@@ -1,0 +1,16 @@
+# Gradle / Android build outputs
+apk-gradle/.gradle/
+apk-gradle/build/
+apk-gradle/app/build/
+apk-gradle/local.properties
+*.iml
+.idea/
+
+# Built core binaries
+core/out/
+*.o
+*.a
+
+# Local test artifacts
+*.log
+__pycache__/
