@@ -48,3 +48,25 @@
 
 - `main`：0.11.67，保持现状；
 - `refactor-98260`：本重构分支，**不合入 main**，验证通过后再另行决定。
+
+## 里程碑 1（2026-11-06）：QEMU 上跑通 iQOO 12 6.1.145 全链
+
+- `core/profiles.h` 落地：PD2571 与 `IC_PROFILE_QEMU_IQOO12` 两份；
+  `-DIC_PROFILE_<NAME>` 选择，`core/build.sh OUT profile` 直接构建。
+- QEMU 内核：`testdata/download_kernel.Image`
+  （6.1.145-android14-11-maybe-dirty，iQOO 12 16.2.11 boot.img）。
+- 从 Image 重新推导：kallsyms（selinux_state/panic_on_warn/root_user/
+  init_user_ns/ucounts/groups/TP）、`do_timer_create` 分配返回点
+  `0x1a12ac`、`dup_task_struct` 返回点 `0xad8d4`、BTF 结构体偏移。
+- **BTF 与运行内核不一致的教训**：`cred_jar/object_size` 实测 184
+  （`prepare_creds` 先 memcpy 0xb0 再补一个 qword），Image 里的 BTF 写
+  176（GKI 基线）。cache 尺寸以 `/sys/kernel/slab/*/object_size` 为准；
+  uid 仍在 +4、user 在 +0x80（`__sys_setuid` 反汇编核实）。
+- 最小 init `harness/qemu_core_init.c`：mount proc/sys/dev/tracefs，
+  可 `ic_uid0=1` 或掉到 uid 2000，跑 `/exploit` 并把 console 当日志。
+- 两个环境坑：NDK API24 静态二进制 TLS 对齐 8 → bionic 拒绝 exec，改用
+  API29；裸 initramfs 里 uid 2000 的 NOFILE 太小，socket 池（6144 fd）把
+  后续 pipe 挤成 EMFILE，init 在 drop 权限前把 NOFILE 抬到 65536。
+- 结果：`free_seen=1 burst hit=1` → reap → 零写 `cred+4` →
+  child `setuid(0)=0`，`resuid=0/0/2000`；仅 `/system/bin/sh` 在
+  initramfs 中不存在（exec errno=2）。

