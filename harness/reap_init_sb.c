@@ -1856,6 +1856,39 @@ static void sel_intern_ctxs(void)
 			sel_intern_one(tok);
 }
 
+/* Make every tracefs file world-accessible.  On the device init mounts
+ * tracefs with gid=shell and atrace-style tools run as the shell uid, so a
+ * shell-domain exploit can drive the kmem events; this bare initramfs mounts
+ * it root-only, which would stop the oracle before the trigger.  Harness
+ * only, and only under ic_tracefs_mount=1. */
+static void chmod_tree(const char *path, int depth)
+{
+	DIR *d;
+	struct dirent *de;
+	struct stat st;
+	char p[512];
+
+	if (depth > 6)
+		return;
+	d = opendir(path);
+	if (!d)
+		return;
+	while ((de = readdir(d))) {
+		if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, ".."))
+			continue;
+		snprintf(p, sizeof(p), "%s/%s", path, de->d_name);
+		if (lstat(p, &st))
+			continue;
+		if (S_ISDIR(st.st_mode)) {
+			chmod(p, 0777);
+			chmod_tree(p, depth + 1);
+		} else if (S_ISREG(st.st_mode)) {
+			chmod(p, 0666);
+		}
+	}
+	closedir(d);
+}
+
 static void shellboot_prepare(void)
 {
 	int fd, e;
@@ -1945,6 +1978,8 @@ static void shellboot_prepare(void)
 		printf("[boot] mount tracefs rc=%d errno=%d\n", rc,
 		       rc ? errno : 0);
 		if (rc == 0) {
+			chmod(TR_DIR, 0777);
+			chmod_tree(TR_DIR, 0);
 			struct stat st;
 
 			if (!stat(TR_DIR "/trace", &st))

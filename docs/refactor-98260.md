@@ -70,3 +70,18 @@
 - 结果：`free_seen=1 burst hit=1` → reap → 零写 `cred+4` →
   child `setuid(0)=0`，`resuid=0/0/2000`；仅 `/system/bin/sh` 在
   initramfs 中不存在（exec errno=2）。
+
+## 里程碑 2（2026-11-06）：enforcing shell 域下同样跑通
+
+- 同一份 `IC_PROFILE_QEMU_IQOO12` core，放进 shellboot harness（uid 2000，
+  `u:r:shell:s0`，policy 打开 enforcing），结果：
+  `free_seen=1 burst hit=1` → reap → 零写 `cred+4` →
+  child `setuid(0)=0`，`resuid=0/0/2000`。
+- harness init 之前把 tracefs 挂成 root-only，shell 域无法写 `enable`，
+  exploit 2 秒内就死在 page event discovery。`ic_tracefs_mount=1` 时改为
+  `chmod_tree` 全树 0666/0777（真机 init 用 gid=shell 达到同样效果）。
+- 日志通道：init 给 payload 的 env 里本来就有 `IC_LOG_PATH=/dev/ic-out`
+  （console 克隆，null_device 标签，shell 域可写），core 在启动时按
+  `IC_LOG_PATH`（无则 `/dev/ic-out`）重定向 stdout/stderr。
+- 唯一未走完的一步是 `/system/bin/sh` 在 initramfs 中不存在（ENOENT）；
+  真机上此步即 landing。
