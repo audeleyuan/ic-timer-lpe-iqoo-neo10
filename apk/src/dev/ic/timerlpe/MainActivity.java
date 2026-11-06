@@ -169,8 +169,15 @@ public class MainActivity extends Activity {
         warn.setText("规则：每次完整运行前重启手机；运行后残留的 ic-timer 进程"
                 + "不能 kill -9，只能重启清理。接管 KSU 需要先装好对应管理器"
                 + "的 APK（管理器自身的内核模块由 late-load 加载）。\n"
-                + "Y500 / iQOO 12 / X100s Pro 已内置偏移（机型+版本匹配）；其他 build 点“解析偏移”用系统"
-                + "文件选择器选 boot.img。");
+                + "已内置偏移（机型 + 版本匹配）：\n"
+                + "· PD2506 / V2506（Y500）：16.1.15.0、16.1.13.2\n"
+                + "· PD2516 / V2516（Y500 Pro）：16.1.11.0\n"
+                + "· PD2307 / PD2329 / V2307（iQOO 12）：16.2.11、16.2.20.3、16.2.20.7、16.2.21.1\n"
+                + "· PD2417 / V2417（X100s Pro）：16.2.14.1\n"
+                + "· PD2324 / V2324A / V2324HA / V2324H / PD2324J（X100 系列）：16.2.12.0、16.2.13.1\n"
+                + "其中 16.2.11 / 16.2.20.x / 16.2.21.1 自带 KSU 交接所需的对象地址；\n"
+                + "其余机型跑 KSU 请先点“解析偏移”选对应 boot.img。\n"
+                + "其他 build：点“解析偏移”用系统文件选择器选 boot.img。");
         root.addView(warn);
 
         LinearLayout row = new LinearLayout(this);
