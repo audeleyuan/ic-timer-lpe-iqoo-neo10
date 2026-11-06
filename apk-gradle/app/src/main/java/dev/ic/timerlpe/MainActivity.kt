@@ -166,6 +166,7 @@ class MainActivity : ComponentActivity() {
     private var ksuIndex by mutableStateOf(0)
     private var safeMode by mutableStateOf(false)
     private var tab by mutableStateOf(AppTab.HOME)
+    private var showManual by mutableStateOf(false)
 
     private var service: IIcService? = null
     private var logPath: String? = null
@@ -292,6 +293,15 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                         CleanupDialog()
+                        AnimatedVisibility(
+                            visible = showManual,
+                            enter = slideInHorizontally(tween(240)) { it } + fadeIn(tween(240)),
+                            exit = slideOutHorizontally(tween(240)) { it } + fadeOut(tween(240))
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                ManualScreen(onBack = { showManual = false })
+                            }
+                        }
                     }
                 }
             }
@@ -343,14 +353,7 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun HomeScreen(backdrop: LayerBackdrop?) {
-        val context = LocalContext.current
         val scrollBehavior = COUIScrollBehavior()
-        val markdown = remember {
-            runCatching {
-                context.assets.open("manual.md").bufferedReader().use { it.readText() }
-            }.getOrElse { "# 使用手册\n\n手册内容读取失败。" }
-        }
-        val blocks = remember(markdown) { parseManualMarkdown(markdown) }
         Scaffold(
             contentWindowInsets = WindowInsets.systemBars.only(WindowInsetsSides.Top),
             topBar = {
@@ -445,6 +448,20 @@ class MainActivity : ComponentActivity() {
                                         )
                                     }
                                 )
+                                HorizontalDivider()
+                                ArrowPreference(
+                                    title = "使用手册",
+                                    summary = "规则、支持机型与常见问题",
+                                    onClick = { showManual = true },
+                                    startAction = {
+                                        Icon(
+                                            imageVector = Icons.Filled.MenuBook,
+                                            contentDescription = null,
+                                            modifier = Modifier.padding(end = 6.dp),
+                                            tint = COUITheme.colorScheme.onBackground
+                                        )
+                                    }
+                                )
                             }
                         }
                     }
@@ -453,7 +470,7 @@ class MainActivity : ComponentActivity() {
                             Column {
                                 ArrowPreference(
                                     title = "解析偏移",
-                                    summary = "从 boot.img 生成 /data/local/tmp/ic-syms.txt",
+                                    summary = "从 boot.img 解析偏移",
                                     onClick = { parseOffsets() },
                                     startAction = {
                                         Icon(
@@ -503,13 +520,6 @@ class MainActivity : ComponentActivity() {
                             fingerprint = Build.FINGERPRINT,
                             selinux = selinuxText,
                             modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                    item { SectionLabel("使用手册") }
-                    itemsIndexed(blocks) { _, block ->
-                        MdBlockView(
-                            block,
-                            COUITheme.colorScheme.onSurface.copy(alpha = 0.08f)
                         )
                     }
                 }
@@ -689,6 +699,35 @@ class MainActivity : ComponentActivity() {
                             Text(line, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
                         }
                     }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun ManualScreen(onBack: () -> Unit) {
+        BackHandler(onBack = onBack)
+        val context = LocalContext.current
+        val markdown = remember {
+            runCatching {
+                context.assets.open("manual.md").bufferedReader().use { it.readText() }
+            }.getOrElse { "# 使用手册\n\n手册内容读取失败。" }
+        }
+        val blocks = remember(markdown) { parseManualMarkdown(markdown) }
+        Scaffold(popupHost = { }) { inner ->
+            val codeBackground = COUITheme.colorScheme.onSurface.copy(alpha = 0.08f)
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(
+                    top = inner.calculateTopPadding() + 16.dp,
+                    start = 20.dp,
+                    end = 20.dp,
+                    bottom = inner.calculateBottomPadding() + 24.dp
+                ),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                itemsIndexed(blocks) { _, block ->
+                    MdBlockView(block, codeBackground)
                 }
             }
         }
@@ -1139,6 +1178,20 @@ class MainActivity : ComponentActivity() {
     /* Backend                                                             */
     /* ------------------------------------------------------------------ */
 
+    /** Returns the bound user service, or tells the user what is still missing. */
+    private fun requireService(action: String): IIcService? {
+        val s = service
+        if (s != null) return s
+        val msg = when {
+            !binderReady -> "Shizuku 未运行：请先用无线调试 / ADB 启动 Shizuku"
+            !authorized -> "Shizuku 未授权：请先允许授权"
+            else -> "用户服务未绑定：请稍候或重新打开应用"
+        }
+        Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+        addLog("[$action] $msg")
+        return null
+    }
+
     private fun refreshAuth() {
         authorized = runCatching {
             Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
@@ -1212,11 +1265,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun runCore() {
-        val s = service
-        if (s == null) {
-            addLog("服务未连接：先点“授权 Shizuku”")
-            return
-        }
+        val s = requireService("运行") ?: return
         val ksuPkg = KSU_PKGS[ksuIndex]
         val safe = safeMode
         val stamp = (System.currentTimeMillis() / 1000).toString()
@@ -1313,11 +1362,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun diag() {
-        val s = service
-        if (s == null) {
-            addLog("服务未连接：先点“授权 Shizuku”")
-            return
-        }
+        val s = requireService("诊断") ?: return
         lifecycleScope.launch {
             val out = withContext(Dispatchers.IO) {
                 runCatching {
@@ -1339,10 +1384,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun parseOffsets() {
-        if (service == null) {
-            addLog("服务未连接：先点“授权 Shizuku”")
-            return
-        }
+        requireService("解析偏移") ?: return
         runCatching {
             parsePicker.launch(arrayOf("*/*"))
         }.onFailure { addLog("[解析偏移] 无法打开文件选择器: $it") }
@@ -1395,12 +1437,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun cleanup() {
-        val s = service
-        if (s == null) {
-            addLog("服务未连接：先点“授权 Shizuku”")
-            return
-        }
-        cleanupDialog = s
+        cleanupDialog = requireService("清理 KSU") ?: return
     }
 
     private var cleanupDialog by mutableStateOf<IIcService?>(null)

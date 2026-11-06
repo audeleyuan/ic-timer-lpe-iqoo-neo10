@@ -43,8 +43,8 @@ POSIX CPU timer UAF（CVE-2026-98260）的 vivo/iQOO 6.1 提权工具：从 shel
 - 工程切到 Gradle + Kotlin + Compose（`apk-gradle/`，旧 `apk/` 保留作参照）；
 - 底部三页：首页 / 日志 / 关于，沿用 Shark 的 `COUITheme`、`Scaffold`、
   `AnimatedContent`、模糊标题栏与卡片组件；
-- 首页：状态卡、一键越狱、ROOT 管理器下拉、安全模式开关、解析偏移 /
-  清理 KSU / 诊断、设备信息卡，使用手册直接渲染在首页底部；
+- 首页：状态卡、一键越狱、ROOT 管理器下拉、安全模式开关、使用手册入口、
+  解析偏移 / 清理 KSU / 诊断、设备信息卡；使用手册是独立入口，点开是全屏页；
 - 日志页实时滚动（清空按钮在标题栏）；关于页为源码 / 社群 / 问题反馈、
   赞赏码与开放源代码许可；
 - 后端替换为本站的 Shizuku 用户服务（`IcService` + `run_core.sh`），
