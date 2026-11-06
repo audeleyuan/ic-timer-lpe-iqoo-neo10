@@ -6,6 +6,7 @@ import android.content.ComponentName;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
+import android.graphics.BitmapFactory;
 import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Bundle;
@@ -17,6 +18,8 @@ import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Spinner;
@@ -55,10 +58,10 @@ public class MainActivity extends Activity {
      * manager APK and speak the same "late-load" CLI.  BakaSU is the renamed
      * ReSukiSU; auto-detect also accepts the old com.resukisu.resukisu id. */
     private static final String[] KSU_NAMES = {
-            "关闭", "自动检测", "KernelSU", "KernelSU-Next", "SukiSU Ultra",
+            "自动检测", "KernelSU", "KernelSU-Next", "SukiSU Ultra",
             "BakaSU", "ReSukiSU (旧包名)", "SakiSU", "FinaSU", "7kimisu" };
     private static final String[] KSU_PKGS = {
-            null, "",
+            "",
             "me.weishu.kernelsu", "com.rifsxd.ksunext", "com.sukisu.ultra",
             "org.bakasu.bakasu", "com.resukisu.resukisu",
             "com.sakisu.sakisu", "me.yuki.fina", "com.sevenk.core" };
@@ -74,6 +77,7 @@ public class MainActivity extends Activity {
     private Button runBtn;
     private Button parseBtn;
     private Button cleanBtn;
+    private View pageHome, pageLog, pageAbout;
 
     private IIcService svc;
     private boolean bound;
@@ -164,34 +168,24 @@ public class MainActivity extends Activity {
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(p, p, p, p);
+
+        FrameLayout content = new FrameLayout(this);
+
+        /* ---------------- 首页 ---------------- */
+        LinearLayout homePage = new LinearLayout(this);
+        homePage.setOrientation(LinearLayout.VERTICAL);
+        homePage.setPadding(p, p, p, p);
 
         TextView title = new TextView(this);
         title.setText("IC Timer LPE  (vivo/iQOO 6.1.145)");
         title.setTextSize(18);
         title.setTypeface(Typeface.DEFAULT_BOLD);
-        root.addView(title);
+        homePage.addView(title);
 
         status = new TextView(this);
         status.setTextSize(12);
         status.setPadding(0, p / 2, 0, p / 2);
-        root.addView(status);
-
-        TextView warn = new TextView(this);
-        warn.setTextSize(12);
-        warn.setText("规则：每次完整运行前重启手机；运行后残留的 ic-timer 进程"
-                + "不能 kill -9，只能重启清理。接管 KSU 需要先装好对应管理器"
-                + "的 APK（管理器自身的内核模块由 late-load 加载）。\n"
-                + "已内置偏移（机型 + 版本匹配）：\n"
-                + "· PD2506 / V2506（Y500）：16.1.15.0、16.1.13.2\n"
-                + "· PD2516 / V2516（Y500 Pro）：16.1.11.0\n"
-                + "· PD2307 / PD2329 / V2307（iQOO 12）：16.2.11、16.2.20.3、16.2.20.7、16.2.21.1\n"
-                + "· PD2417 / V2417（Z9 Turbo+）：16.2.14.1\n"
-                + "· PD2324 / V2324A / V2324HA / V2324H / PD2324J（X100 系列）：16.2.12.0、16.2.13.1\n"
-                + "列表内机型均已内置 KSU 交接所需的对象地址，无需解析。\n"
-                + "列表外的新 build：点“解析偏移”用系统文件选择器选 boot.img。\n"
-                + "本软件免费开源，作者酷安@散花神木");
-        root.addView(warn);
+        homePage.addView(status);
 
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -211,7 +205,7 @@ public class MainActivity extends Activity {
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         row.addView(diagBtn, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        root.addView(row);
+        homePage.addView(row);
 
         LinearLayout tools = new LinearLayout(this);
         tools.setOrientation(LinearLayout.HORIZONTAL);
@@ -225,7 +219,7 @@ public class MainActivity extends Activity {
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         tools.addView(cleanBtn, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        root.addView(tools);
+        homePage.addView(tools);
 
         LinearLayout ksuRow = new LinearLayout(this);
         ksuRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -239,25 +233,159 @@ public class MainActivity extends Activity {
         ksuAdapter.setDropDownViewResource(
                 android.R.layout.simple_spinner_dropdown_item);
         ksuView.setAdapter(ksuAdapter);
-        ksuView.setSelection(1);
+        ksuView.setSelection(0);
         ksuRow.addView(ksuLabel);
         ksuRow.addView(ksuView, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        root.addView(ksuRow);
+        homePage.addView(ksuRow);
 
         safeView = new CheckBox(this);
         safeView.setTextSize(12);
         safeView.setText("安全模式：提权时禁用全部 KSU 模块");
-        root.addView(safeView);
+        homePage.addView(safeView);
 
+        TextView warn = new TextView(this);
+        warn.setTextSize(12);
+        warn.setText("使用手册\n"
+                + "规则：每次完整运行前重启手机；运行后残留的 ic-timer 进程"
+                + "不能 kill -9，只能重启清理。接管 KSU 需要先装好对应管理器"
+                + "的 APK（管理器自身的内核模块由 late-load 加载）。\n"
+                + "已内置偏移（机型 + 版本匹配）：\n"
+                + "· PD2506 / V2506（Y500）：16.1.15.0、16.1.13.2\n"
+                + "· PD2516 / V2516（Y500 Pro）：16.1.11.0\n"
+                + "· PD2307 / PD2329 / V2307（iQOO 12）：16.2.11、16.2.20.3、16.2.20.7、16.2.21.1\n"
+                + "· PD2417 / V2417（Z9 Turbo+）：16.2.14.1\n"
+                + "· PD2324 / V2324A / V2324HA / V2324H / PD2324J（X100 系列）：16.2.12.0、16.2.13.1\n"
+                + "列表内机型均已内置 KSU 交接所需的对象地址，无需解析。\n"
+                + "列表外的新 build：点“解析偏移”用系统文件选择器选 boot.img。\n"
+                + "本软件免费开源，作者酷安@散花神木");
+        warn.setPadding(0, p / 2, 0, 0);
+        homePage.addView(warn);
+
+        ScrollView homeScroll = new ScrollView(this);
+        homeScroll.addView(homePage);
+        content.addView(homeScroll, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+
+        /* ---------------- 日志 ---------------- */
+        LinearLayout logPageView = new LinearLayout(this);
+        logPageView.setOrientation(LinearLayout.VERTICAL);
+        logPageView.setPadding(p, p, p, p);
+        TextView logTitle = new TextView(this);
+        logTitle.setText("日志");
+        logTitle.setTextSize(16);
+        logTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        logPageView.addView(logTitle);
+        Button clearBtn = new Button(this);
+        clearBtn.setText("清空日志");
+        clearBtn.setOnClickListener(v -> log.setText(""));
+        logPageView.addView(clearBtn);
         scroll = new ScrollView(this);
         log = new TextView(this);
         log.setTextSize(10);
         log.setTypeface(Typeface.MONOSPACE);
         log.setTextIsSelectable(true);
         scroll.addView(log);
-        root.addView(scroll, new LinearLayout.LayoutParams(
+        logPageView.addView(scroll, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+        content.addView(logPageView, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+
+        /* ---------------- 关于 ---------------- */
+        LinearLayout aboutPageView = new LinearLayout(this);
+        aboutPageView.setOrientation(LinearLayout.VERTICAL);
+        aboutPageView.setPadding(p, p, p, p);
+        TextView aboutTitle = new TextView(this);
+        aboutTitle.setText("关于");
+        aboutTitle.setTextSize(16);
+        aboutTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        aboutPageView.addView(aboutTitle);
+        String verName = "?";
+        try {
+            verName = getPackageManager().getPackageInfo(
+                    getPackageName(), 0).versionName;
+        } catch (Throwable ignored) { }
+        TextView aboutVer = new TextView(this);
+        aboutVer.setText("IC Timer LPE  " + verName);
+        aboutVer.setTextSize(13);
+        aboutVer.setPadding(0, p / 2, 0, p);
+        aboutPageView.addView(aboutVer);
+
+        aboutPageView.addView(linkRow("查看源代码",
+                "在 GitHub 上查看源代码",
+                "https://github.com/kzktor/ic-timer-lpe"));
+        aboutPageView.addView(linkRow("加入社区",
+                "加入 QQ 群",
+                "https://qm.qq.com/q/MBM9NcDXYy"));
+        aboutPageView.addView(linkRow("问题反馈",
+                "在 GitHub Issues 提交问题",
+                "https://github.com/kzktor/ic-timer-lpe/issues"));
+
+        TextView supTitle = new TextView(this);
+        supTitle.setText("支持开发者");
+        supTitle.setTextSize(13);
+        supTitle.setPadding(0, p, 0, p / 2);
+        aboutPageView.addView(supTitle);
+        ImageView qr = new ImageView(this);
+        try (InputStream in = getAssets().open("donate.png")) {
+            qr.setImageBitmap(BitmapFactory.decodeStream(in));
+        } catch (Throwable ignored) { }
+        qr.setAdjustViewBounds(true);
+        aboutPageView.addView(qr, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        TextView licTitle = new TextView(this);
+        licTitle.setText("开放源代码许可");
+        licTitle.setTextSize(13);
+        licTitle.setPadding(0, p, 0, p / 2);
+        aboutPageView.addView(licTitle);
+        TextView licBody = new TextView(this);
+        licBody.setTextSize(11);
+        licBody.setText("本项目：kzktor/ic-timer-lpe\n"
+                + "· molanp/CVE-2026-98260-vivo-s60-poc（MIT）\n"
+                + "· woshigenm/CVE-2026-98260（MIT）\n"
+                + "· whooslizi/infinitycore-x200pro（GPL-3.0）\n"
+                + "· nisu123f/dada-cve-AN00\n"
+                + "· kpgc10kai/TimerRoot");
+        aboutPageView.addView(licBody);
+
+        ScrollView aboutScroll = new ScrollView(this);
+        aboutScroll.addView(aboutPageView);
+        content.addView(aboutScroll, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+
+        pageHome = homeScroll;
+        pageLog = logPageView;
+        pageAbout = aboutScroll;
+        pageLog.setVisibility(View.GONE);
+        pageAbout.setVisibility(View.GONE);
+
+        /* ---------------- 底部导航 ---------------- */
+        LinearLayout nav = new LinearLayout(this);
+        nav.setOrientation(LinearLayout.HORIZONTAL);
+        Button navHome = new Button(this);
+        navHome.setText("首页");
+        navHome.setOnClickListener(v -> showPage(0));
+        Button navLog = new Button(this);
+        navLog.setText("日志");
+        navLog.setOnClickListener(v -> showPage(1));
+        Button navAbout = new Button(this);
+        navAbout.setText("关于");
+        navAbout.setOnClickListener(v -> showPage(2));
+        nav.addView(navHome, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        nav.addView(navLog, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        nav.addView(navAbout, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        root.addView(content, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+        root.addView(nav);
 
         setContentView(root);
 
@@ -265,6 +393,27 @@ public class MainActivity extends Activity {
         Shizuku.addBinderDeadListener(onDead);
         Shizuku.addRequestPermissionResultListener(onPerm);
         refresh();
+    }
+
+    private void showPage(int idx) {
+        if (pageHome == null)
+            return;
+        pageHome.setVisibility(idx == 0 ? View.VISIBLE : View.GONE);
+        pageLog.setVisibility(idx == 1 ? View.VISIBLE : View.GONE);
+        pageAbout.setVisibility(idx == 2 ? View.VISIBLE : View.GONE);
+    }
+
+    private TextView linkRow(String title, String summary, String url) {
+        TextView t = new TextView(this);
+        t.setText(title + "\n" + summary);
+        t.setTextSize(13);
+        t.setPadding(0, 8, 0, 8);
+        t.setOnClickListener(v -> {
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+            } catch (Throwable ignored) { }
+        });
+        return t;
     }
 
     @Override
