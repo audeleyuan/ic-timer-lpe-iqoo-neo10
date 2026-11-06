@@ -1883,12 +1883,10 @@ static void run_plant(unsigned long long target, int tag, int mode,
                 (g_init_user_ns_link ? g_init_user_ns_link
                                      : INIT_USER_NS_STATIC) +
                 g_slide;
-#if CRED_HAS_UCOUNTS
             *(unsigned long long *)(payload + off + OFF_CRED_UCOUNTS) =
                 (g_init_ucounts_link ? g_init_ucounts_link
                                      : INIT_UCOUNTS_STATIC) +
                 g_slide;
-#endif
             *(unsigned long long *)(payload + off + OFF_CRED_GROUP_INFO) =
                 (g_init_groups_link ? g_init_groups_link
                                     : INIT_GROUPS_STATIC) +
