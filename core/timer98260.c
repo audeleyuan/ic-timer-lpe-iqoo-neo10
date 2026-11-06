@@ -2279,6 +2279,24 @@ static int wait_child_main(const char *mode)
         errno = 0;
         w = fork();
         logf("[fake] worker fork w=%d errno=%d\n", (int)w, errno);
+        /* Small-RAM devices exhaust the page cache with the spray before the
+         * handoff; copy_process then fails with ENOMEM.  We are a full-cap
+         * root here, so drop caches and retry a couple of times. */
+        for (int ftry = 0; w < 0 && errno == ENOMEM && ftry < 3; ftry++)
+        {
+            int dc = open("/proc/sys/vm/drop_caches", O_WRONLY);
+
+            if (dc >= 0)
+            {
+                (void)!write(dc, "1", 1);
+                close(dc);
+            }
+            usleep(300000);
+            errno = 0;
+            w = fork();
+            logf("[fake] worker fork retry %d -> w=%d errno=%d\n", ftry + 1,
+                 (int)w, errno);
+        }
         if (w < 0)
         {
             /* copy_process can fail on a forged cred (ucounts/RLIMIT_NPROC
