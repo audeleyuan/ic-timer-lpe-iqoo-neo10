@@ -177,7 +177,8 @@ public class MainActivity extends Activity {
                 + "· PD2324 / V2324A / V2324HA / V2324H / PD2324J（X100 系列）：16.2.12.0、16.2.13.1\n"
                 + "其中 16.2.11 / 16.2.20.x / 16.2.21.1 自带 KSU 交接所需的对象地址；\n"
                 + "其余机型跑 KSU 请先点“解析偏移”选对应 boot.img。\n"
-                + "其他 build：点“解析偏移”用系统文件选择器选 boot.img。");
+                + "其他 build：点“解析偏移”用系统文件选择器选 boot.img。\n"
+                + "本软件免费开源，作者酷安@散花神木");
         root.addView(warn);
 
         LinearLayout row = new LinearLayout(this);
