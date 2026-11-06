@@ -62,8 +62,14 @@ out.append("static const struct ic_anchor_build ic_anchor_builds[] = {")
 if imglink is not None:
     out.append('    { "6.1.145-android14-11-maybe-dirty", "PD2307|PD2329|V2307", "16.2.11", "iqoo12-16.2.11", {')
     out.append("        " + ", ".join("0x%xULL" % v for v in imglink) + " } },")
+# addresses of the builtin reference table (used by the NULL-links entry)
+builtin_addr = re.findall(r'\{\s*"([^"]+)"\s*,\s*(0x[0-9a-fA-F]+)ULL\s*\}', body)
+builtin_vals = [int(a, 16) for _, a in builtin_addr]
 for kernel, models, version, arr in kb:
     if arr == "NULL":
+        if len(builtin_vals) == len(names):
+            out.append('    { "%s", "%s", "%s", "builtin-16.1.15.0", {' % (kernel, models, version))
+            out.append("        " + ", ".join("0x%xULL" % v for v in builtin_vals) + " } },")
         continue
     vals = arrays.get(arr)
     if not vals or len(vals) != len(names):

@@ -31,6 +31,14 @@ static const struct ic_extra_syms ic_extra_syms_tab[] = {
      * selinux=0xffffffc00a558f40 both match the table). */
     { "ic_iqoo12_links", 0xffffffc00a1f11c8ULL, 0xffffffc00a1f2a78ULL,
       0xffffffc00a1f24e8ULL },
+    /* PD2516/V2516 (Y500 Pro) 16.1.11.0, kernel_y500pro_16110.img
+     * (tp=0xffffffc00a2d17e0 / selinux=0xffffffc00a45d8c8 match). */
+    { "ic_y500pro_16110_links", 0xffffffc00a101088ULL, 0xffffffc00a102938ULL,
+      0xffffffc00a1023a8ULL },
+    /* PD2324 (X100 series) 16.2.12.0, pd2324_kernel.Image
+     * (tp=0xffffffc00a2f3600 matches). */
+    { "ic_pd2324_links", 0xffffffc00a121108ULL, 0xffffffc00a1229b8ULL,
+      0xffffffc00a122428ULL },
 };
 
 #endif /* IC_EXTRA_SYMS_H */
