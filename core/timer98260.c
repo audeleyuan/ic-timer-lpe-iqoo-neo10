@@ -3572,13 +3572,19 @@ int main(int argc, char **argv)
                     }
                 fclose(f);
             }
-            if (!init_ok)
+            /* In ksu mode the handoff is the App's ksu_handoff.sh, which
+             * publishes its verdict on stdout (late-load rc + module
+             * resident) instead of writing this stage log.  Requiring the
+             * stage file there rejected a perfectly good handoff -- the
+             * module was already resident when it fired. */
+            if (!init_ok && !g_exec_payload)
             {
                 logf("[!] ksud init stages did not complete; not starting the "
                      "manager\n");
                 return 1;
             }
-            logf("[+] ksud init stages complete; starting manager\n");
+            logf("[+] ksud init stages %s; starting manager\n",
+                 init_ok ? "complete" : "verified by the ksu payload");
         }
 
         /* No seccomp patching.  No manager patching of any kind.
