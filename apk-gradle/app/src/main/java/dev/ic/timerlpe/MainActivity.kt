@@ -169,6 +169,7 @@ class MainActivity : ComponentActivity() {
     private var showManual by mutableStateOf(false)
     private var runStage by mutableStateOf("")
     private var runStageIndex = -1
+    private var offsetPrompt by mutableStateOf<String?>(null)
 
     private var service: IIcService? = null
     private var logPath: String? = null
@@ -295,6 +296,7 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                         CleanupDialog()
+                        OffsetPromptDialog()
                         AnimatedVisibility(
                             visible = showManual,
                             enter = slideInHorizontally(tween(240)) { it } + fadeIn(tween(240)),
@@ -1275,17 +1277,14 @@ class MainActivity : ComponentActivity() {
         val bin = "$TMP/ic-timer-a$stamp"
         val script = "$TMP/ic-lpe-a$stamp.sh"
         val logFile = "$TMP/ic-app-a$stamp.log"
-        val handoff = if (ksuPkg.isEmpty()) null else "$TMP/ksu-h$stamp.sh"
-        val safeScript = if (safe && handoff == null) "$TMP/ic-safe-h$stamp.sh" else null
+        /* The manager dropdown has no "off" entry any more: every choice runs
+         * the KSU handoff, and an empty package means "auto-detect". */
+        val handoff = "$TMP/ksu-h$stamp.sh"
         val proof = DEFAULT_CMD
-        val payload = when {
-            handoff != null -> "sh $handoff '$ksuPkg' '' '${if (safe) "1" else "0"}' ; $proof"
-            safeScript != null -> "sh $safeScript ; $proof"
-            else -> proof
-        }
+        val payload = "sh $handoff '$ksuPkg' '' '${if (safe) "1" else "0"}' ; $proof"
         val extraEnv = "IC_SYMS_FILE=/data/local/tmp/ic-syms.txt" +
             (if (safe) "\nIC_SAFE_MODE=1" else "") +
-            (if (handoff != null) "\nIC_KSU=1" else "")
+            "\nIC_KSU=1"
 
         busy = true
         runStageIndex = 0
@@ -1310,15 +1309,32 @@ class MainActivity : ComponentActivity() {
                     push(s, "ic-timer", bin)
                     s.makeExec(bin)
 
-                    if (handoff != null) {
-                        s.truncate(handoff)
-                        push(s, "ksu_handoff.sh", handoff)
-                        s.makeExec(handoff)
+                    s.truncate(handoff)
+                    push(s, "ksu_handoff.sh", handoff)
+                    s.makeExec(handoff)
+
+                    /* Preflight: ask the core whether this build has offsets
+                     * (built-in anchor table / kallsyms / ic-syms.txt).  A run
+                     * without them cannot do anything but fail, so stop here
+                     * and point the user at the boot.img parser. */
+                    val info = s.runCmd("$bin info 2>&1")
+                    addLogOnMain("[info] " + info.trim())
+                    val haveCore = Regex("have_core=(\\d)").find(info)?.groupValues?.get(1)
+                    val haveFake = Regex("have_fake=(\\d)").find(info)?.groupValues?.get(1)
+                    if (haveCore == null) {
+                        postUi {
+                            offsetPrompt = "无法确认当前版本的内核偏移（内核可能不受支持）。\n\n" +
+                                "请点「解析偏移」，选择该机型的 boot.img 生成符号表。"
+                        }
+                        return@withContext true
                     }
-                    if (safeScript != null) {
-                        s.truncate(safeScript)
-                        push(s, "safemode.sh", safeScript)
-                        s.makeExec(safeScript)
+                    if (haveCore != "1" || haveFake != "1") {
+                        postUi {
+                            offsetPrompt = "没有当前版本的偏移，请手动解析偏移。\n\n" +
+                                "点「解析偏移」选择该机型的 boot.img，生成 " +
+                                "/data/local/tmp/ic-syms.txt 后再点一键越狱。"
+                        }
+                        return@withContext true
                     }
 
                     s.truncate(logFile)
@@ -1495,6 +1511,42 @@ class MainActivity : ComponentActivity() {
                 }
             }
         )
+    }
+
+    @Composable
+    private fun OffsetPromptDialog() {
+        val msg = offsetPrompt
+        OverlayDialog(
+            show = msg != null,
+            title = "缺少偏移",
+            onDismissRequest = { offsetPrompt = null },
+            content = {
+                Column(
+                    modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 24.dp)
+                ) {
+                    Text(msg ?: "", fontSize = 13.sp)
+                    Spacer(Modifier.height(16.dp))
+                    TextButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        text = "解析偏移",
+                        onClick = {
+                            offsetPrompt = null
+                            parseOffsets()
+                        },
+                        colors = ButtonDefaults.textButtonColorsPrimary()
+                    )
+                    TextButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        text = "取消",
+                        onClick = { offsetPrompt = null }
+                    )
+                }
+            }
+        )
+    }
+
+    private fun postUi(block: () -> Unit) {
+        runOnUiThread(block)
     }
 
     private fun doCleanup(s: IIcService, apk: Boolean) {

@@ -151,6 +151,9 @@ static int g_root_ok;
 static int g_diag;
 static unsigned long long g_child_task;
 static unsigned g_t_page_alloc, g_t_page_free;
+/* Name of the built-in anchor table picked for this build ("none" when the
+ * build has no table and nothing came from kallsyms / ic-syms.txt). */
+static const char *g_anchor_table = "none";
 
 static void logf(const char *fmt, ...);
 
@@ -3063,6 +3066,7 @@ int main(int argc, char **argv)
 
         read_build_id(bid, sizeof(bid));
         tab = anchor_pick(bid);
+        g_anchor_table = tab ? tab->name : "none";
         logf("[anchors] build=%s table=%s\n", bid[0] ? bid : "?",
              tab ? tab->name : "none");
         if (tab)
@@ -3159,6 +3163,25 @@ int main(int argc, char **argv)
                  g_root_user_link, g_init_user_ns_link, g_init_ucounts_link,
                  g_init_groups_link, g_init_cred_link);
         }
+    }
+
+    /* `core info` -- App preflight.  Reports whether this build has usable
+     * offsets before anything touches the kernel, so the App can ask the
+     * user to parse the boot.img first instead of starting a doomed run.
+     *     have_core: de-tag + slide sources (kallsyms or anchor table/file)
+     *     have_fake: the fake-cred objects the KSU endgame needs            */
+    if (argc > 1 && !strcmp(argv[1], "info"))
+    {
+        char bid[160];
+
+        read_build_id(bid, sizeof(bid));
+        logf("[info] build=%s table=%s have_core=%d have_fake=%d\n",
+             bid[0] ? bid : "?", g_anchor_table,
+             (g_tp_link && g_selinux_link) ? 1 : 0,
+             (g_root_user_link && g_init_user_ns_link &&
+              g_init_ucounts_link && g_init_groups_link &&
+              g_init_cred_link) ? 1 : 0);
+        return 0;
     }
 
     if (argc > 2 && !strcmp(argv[1], "cpu"))
