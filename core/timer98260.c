@@ -2344,6 +2344,25 @@ static int wait_child_main(const char *mode)
             (char *)"ANDROID_DATA=/data", (char *)"ANDROID_ROOT=/system",
             NULL};
 
+        /* The App passes its payload command through PAYLOAD_CMD even
+         * without a KSU manager (proof command, or "sh safemode.sh ; cmd"
+         * when 安全模式 is checked).  Run it here instead of the hardcoded
+         * proof so safe mode works in the shell path too. */
+        {
+            const char *pc = getenv("PAYLOAD_CMD");
+
+            if (pc && *pc)
+            {
+                char *const pv[] = {(char *)"sh", (char *)"-c",
+                                    (char *)pc, NULL};
+
+                logf("[shell] exec payload uid=%d euid=%d\n", getuid(),
+                     geteuid());
+                errno = 0;
+                execve("/system/bin/sh", pv, envp);
+                logf("[-] payload exec failed errno=%d\n", errno);
+            }
+        }
         if (!strcmp(mode, "shell"))
         {
             char *const av[] = {(char *)"sh", (char *)"-i", NULL};
