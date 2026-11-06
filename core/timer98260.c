@@ -2924,6 +2924,8 @@ int main(int argc, char **argv)
     int shell_mode = 0, leak_only = 0, ids_only = 0;
 
     setvbuf(stdout, NULL, _IONBF, 0);
+    logf("[main] up pid=%d argc=%d a1=%s\n", getpid(), argc,
+         argc > 1 ? argv[1] : "-");
     /* Offline harness channel.  The initrd's init mknods /dev/ic-out as a
      * clone of the console and labels it null_device, which the shell domain
      * may write even while the policy is enforced; redirect both stdio
@@ -2942,7 +2944,11 @@ int main(int argc, char **argv)
                 close(lfd);
         }
     }
-    setsid();
+    {
+        int sr = setsid();
+
+        logf("[main] setsid rc=%d errno=%d\n", sr, errno);
+    }
     signal(SIGHUP, SIG_IGN);
     signal(SIGINT, SIG_IGN);
     signal(SIGTERM, SIG_IGN);
@@ -3015,7 +3021,6 @@ int main(int argc, char **argv)
     if (argc > 1 && !strcmp(argv[1], "sites")) {
         setvbuf(stdout, NULL, _IONBF, 0);
         pin(g_cpu);
-        logf("[core] built %s %s\n", __DATE__, __TIME__);
     logf("[+] pid=%d cpu=%d\n", getpid(), g_cpu);
         dump_sites();
         return 0;
@@ -3151,6 +3156,7 @@ int main(int argc, char **argv)
     }
 
     pin(g_cpu);
+    logf("[core] built %s %s\n", __DATE__, __TIME__);
     logf("[+] pid=%d cpu=%d\n", getpid(), g_cpu);
     enable_events();
     kick_rss();
