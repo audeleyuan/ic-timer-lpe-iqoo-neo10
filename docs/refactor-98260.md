@@ -99,3 +99,18 @@
   shell 域里拿到
   `[qsh] uid=0 euid=0 resuid=0/0/0 ctx=u:r:shell:s0 ... ROOT_SHELL_OK`。
   真机上这一步就是 exec 真实 shell / KSU 交接。
+
+## 里程碑 4（2026-11-06）：fake-cred 路径的布局差异与两级回读
+
+- 本内核 `struct cred` 以 4 字节 `usage` 开头（`__sys_setuid` 的写点
+  0x4/0xc/0x14/0x1c、`cap_capable` 的 cap_effective@0x38、`commit_creds`
+  的 user@0x80 / user_ns@0x88 / ucounts@0x90 都与之吻合），而 PD2571 是
+  8 字节 usage（uid@8、caps@0x2c）。
+- fake cred 直接坐在 timer 节点上：节点 `__rb_parent_color`（写 V+0x78）
+  与本布局的 uid 重叠，未命中时 child 读到 uid = 指针高半 = -128；命中后
+  uid 是 0xffffff80，与调用者 uid 可区分。
+- 因此 fake_cred 与 fake_uid 两级都改为回读 `/proc/<child>/status` 的
+  Uid 再决定是否重发（各最多 8 次），fake_cred 以"uid 不再是调用者 uid"
+  作为指针替换成功的判据。
+- 离线 fake 全链尚未稳定跑绿（shell 路径已稳定），QEMU 下每次 attempt
+  约 40 s，需要更长预算；真机不受这个吞吐限制。

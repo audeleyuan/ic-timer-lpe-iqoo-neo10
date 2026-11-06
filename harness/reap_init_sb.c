@@ -2331,7 +2331,20 @@ static void shellboot_child(int wfd)
 		for (i = 0; envp[i]; i++)
 			printf("[boot] env %u %s\n", i, envp[i]);
 	}
-	execve(SHELLBOOT_BIN, (char *const[]){ "exploit", NULL }, envp);
+	{
+		/* Optional payload argument, for offline runs of the core's
+		 * subcommands ("shell", "fake", "leak", "sites").  Not used on
+		 * the device. */
+		const char *pa = cmdline_value("ic_payload_arg=");
+
+		if (pa && *pa)
+			execve(SHELLBOOT_BIN,
+			       (char *const[]){ "exploit", (char *)pa, NULL },
+			       envp);
+		else
+			execve(SHELLBOOT_BIN,
+			       (char *const[]){ "exploit", NULL }, envp);
+	}
 	e = errno;
 	(void)write(1, "exec failed\n", 12);
 	_exit(e ? e : 1);
