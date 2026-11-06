@@ -93,6 +93,7 @@
  */
 #include "profiles.h"
 #include "ic_syms.h"
+#include "extra_syms.h"
 static int g_timer_site_kind = 0;
 /* Runtime-detected do_timer_create call site.  The low 21 bits are a
  * per-build constant (the KASLR slide is 2 MiB aligned and does not touch
@@ -3037,6 +3038,29 @@ int main(int argc, char **argv)
                 g_selinux_link = tab->link[IC_ANCHOR_N - 3];
                 if (!g_init_cred_link)
                     g_init_cred_link = tab->link[IC_ANCHOR_N - 1];
+                /* Fill the fake-cred objects the anchor tables lack, when
+                 * this build's image was available offline. */
+                {
+                    size_t ei;
+
+                    for (ei = 0; ei < sizeof(ic_extra_syms_tab) /
+                                        sizeof(ic_extra_syms_tab[0]);
+                         ei++)
+                    {
+                        const struct ic_extra_syms *xs =
+                            &ic_extra_syms_tab[ei];
+
+                        if (strcmp(xs->table, tab->name))
+                            continue;
+                        if (!g_root_user_link)
+                            g_root_user_link = xs->root_user;
+                        if (!g_init_ucounts_link)
+                            g_init_ucounts_link = xs->init_ucounts;
+                        if (!g_init_groups_link)
+                            g_init_groups_link = xs->init_groups;
+                        break;
+                    }
+                }
             }
         }
         if (tab && (getenv("IC_FORCE_ANCHORS") ||
