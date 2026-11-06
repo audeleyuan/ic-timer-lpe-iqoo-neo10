@@ -28,8 +28,9 @@ echo "[core] memtotal=$(sed -n 's/^MemTotal:[[:space:]]*\([0-9]*\).*/\1/p' /proc
 # with the full capability set, which is the fake-cred endgame ("ksu" mode);
 # the shell path only reaches uid 0 inside u:r:shell:s0 without caps.
 MODE=
+if [ "${IC_KSU:-0}" = "1" ]; then MODE=ksu; fi
 case "${PAYLOAD_CMD:-}" in
-    *ksu_handoff*) MODE=ksu ;;
+    *ksu_handoff*|*ksu-h*) MODE=ksu ;;
 esac
 if [ -n "$MODE" ]; then
     echo "[core] mode=ksu payload=$(echo "${PAYLOAD_CMD:-}" | head -c 80)"

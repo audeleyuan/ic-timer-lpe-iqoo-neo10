@@ -5,8 +5,8 @@
 set -eu
 
 ROOT=D:/kwork/icv11/apk
-VCODE=103
-VNAME=0.12.12
+VCODE=104
+VNAME=0.12.13
 SDK=D:/Android/Sdk
 BT=$SDK/build-tools/34.0.0
 AJ=$SDK/platforms/android-34/android.jar
@@ -74,9 +74,9 @@ fi
 "$JAVA" -jar "$BT/lib/apksigner.jar" sign \
     --ks "$ROOT/debug.keystore" --ks-pass pass:android \
     --key-pass pass:android \
-    --out "$OUT/ic-timer-lpe-0.12.12.apk" "$OUT/apk/aligned.apk"
+    --out "$OUT/ic-timer-lpe-0.12.13.apk" "$OUT/apk/aligned.apk"
 
 echo "== verify"
 "$JAVA" -jar "$BT/lib/apksigner.jar" verify --print-certs \
-    "$OUT/ic-timer-lpe-0.12.12.apk" | head -4
-ls -l "$OUT/ic-timer-lpe-0.12.12.apk"
+    "$OUT/ic-timer-lpe-0.12.13.apk" | head -4
+ls -l "$OUT/ic-timer-lpe-0.12.13.apk"

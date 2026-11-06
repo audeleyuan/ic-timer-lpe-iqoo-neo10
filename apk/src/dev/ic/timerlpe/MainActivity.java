@@ -371,7 +371,8 @@ public class MainActivity extends Activity {
         // SELinux permissive only on a stock device.
         final String payload = pl;
         final String extraEnv = "IC_SYMS_FILE=/data/local/tmp/ic-syms.txt"
-                + (safe ? "\nIC_SAFE_MODE=1" : "");
+                + (safe ? "\nIC_SAFE_MODE=1" : "")
+                + (handoff != null ? "\nIC_KSU=1" : "");
 
         runBtn.setEnabled(false);
         new Thread(() -> {
