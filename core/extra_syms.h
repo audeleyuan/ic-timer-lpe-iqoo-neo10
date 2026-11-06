@@ -26,6 +26,11 @@ static const struct ic_extra_syms ic_extra_syms_tab[] = {
      * (iqoo12-16211-kernel.Image; tp=0xffffffc00a3cc1c0 matches the table) */
     { "ic_iqoo12_16211_links", 0xffffffc00a1f11c8ULL, 0xffffffc00a1f2a78ULL,
       0xffffffc00a1f24e8ULL },
+    /* PD2307 16.2.20.3 / 16.2.20.7 share ic_iqoo12_links; extracted from
+     * pd2307-162207-boot.img (tp=0xffffffc00a3cb180 and
+     * selinux=0xffffffc00a558f40 both match the table). */
+    { "ic_iqoo12_links", 0xffffffc00a1f11c8ULL, 0xffffffc00a1f2a78ULL,
+      0xffffffc00a1f24e8ULL },
 };
 
 #endif /* IC_EXTRA_SYMS_H */
