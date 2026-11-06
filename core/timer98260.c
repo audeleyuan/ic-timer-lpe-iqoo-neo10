@@ -2383,6 +2383,40 @@ static void dump_sites(void)
  */
 #include "anchors.h"
 
+/* External symbol table (the old tool's `ic-timer syms boot.img`, or the
+ * PC-side tool/parse_offsets.py).  Only the plan symbols matter: the slide
+ * comes from the timer call site, so a table generated for any build is
+ * directly usable without the anchor vote.  Format: "name=0xADDR" lines. */
+static int read_syms_file(const char *path)
+{
+    FILE *f = fopen(path, "r");
+    char line[256];
+    int n = 0;
+
+    if (!f)
+        return 0;
+    while (fgets(line, sizeof(line), f))
+    {
+        char name[128];
+        unsigned long long v;
+
+        if (sscanf(line, "%127[^=]=0x%llx", name, &v) != 2 || !v)
+            continue;
+        if (!strcmp(name, "__tracepoint_sys_exit"))
+        {
+            g_tp_link = v;
+            n++;
+        }
+        else if (!strcmp(name, "selinux_state"))
+        {
+            g_selinux_link = v;
+            n++;
+        }
+    }
+    fclose(f);
+    return n;
+}
+
 static void read_build_id(char *out, size_t cap)
 {
     out[0] = 0;
@@ -2820,6 +2854,21 @@ int main(int argc, char **argv)
          * kallsyms gave us so the vote must stand on its own. */
         g_text_runtime = g_tp_runtime = g_selinux_runtime = 0;
     }
+    {
+        /* The old tool's generated table (if the user pushed one) wins over
+         * the built-in tables: it is the only source for builds we do not
+         * ship, e.g. PD2425 / 16.1.17.10. */
+        const char *sf = getenv("IC_SYMS_FILE");
+
+        if (!sf || !*sf)
+            sf = "/data/local/tmp/ic-syms.txt";
+        {
+            int sn = read_syms_file(sf);
+
+            logf("[syms] %s -> %d (tp=%#llx selinux=%#llx)\n", sf, sn,
+                 g_tp_link, g_selinux_link);
+        }
+    }
     if (!g_tp_runtime && !g_text_runtime)
     {
         char bid[160];
@@ -2836,8 +2885,11 @@ int main(int argc, char **argv)
              * here.  The anchor vote is kept for experiments because
              * sched_blocked_reason is gated by schedstats and does not fire
              * on every build. */
-            g_tp_link = tab->link[IC_ANCHOR_N - 4];
-            g_selinux_link = tab->link[IC_ANCHOR_N - 3];
+            if (!g_tp_link)
+            {
+                g_tp_link = tab->link[IC_ANCHOR_N - 4];
+                g_selinux_link = tab->link[IC_ANCHOR_N - 3];
+            }
         }
         if (tab && (getenv("IC_FORCE_ANCHORS") ||
                     (argc > 1 && !strcmp(argv[1], "anchors"))))
