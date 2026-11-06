@@ -55,13 +55,13 @@ public class MainActivity extends Activity {
      * manager APK and speak the same "late-load" CLI.  BakaSU is the renamed
      * ReSukiSU; auto-detect also accepts the old com.resukisu.resukisu id. */
     private static final String[] KSU_NAMES = {
-            "关闭", "自动检测", "KernelSU", "SukiSU Ultra",
-            "BakaSU", "ReSukiSU (旧包名)", "SakiSU", "7kimisu" };
+            "关闭", "自动检测", "KernelSU", "KernelSU-Next", "SukiSU Ultra",
+            "BakaSU", "ReSukiSU (旧包名)", "SakiSU", "FinaSU", "7kimisu" };
     private static final String[] KSU_PKGS = {
             null, "",
-            "me.weishu.kernelsu", "com.sukisu.ultra",
+            "me.weishu.kernelsu", "com.rifsxd.ksunext", "com.sukisu.ultra",
             "org.bakasu.bakasu", "com.resukisu.resukisu",
-            "com.sakisu.sakisu", "com.sevenk.core" };
+            "com.sakisu.sakisu", "me.yuki.fina", "com.sevenk.core" };
 
     private final Handler ui = new Handler(Looper.getMainLooper());
 
@@ -109,7 +109,20 @@ public class MainActivity extends Activity {
                     id = "读取身份失败: " + t;
                 }
                 final String fid = id;
-                ui.post(() -> { append("[service] " + fid); refresh(); });
+                String dev;
+                try {
+                    dev = svc.runCmd("getprop ro.product.model; "
+                            + "getprop ro.build.display.id; uname -r");
+                } catch (Throwable t) {
+                    dev = "";
+                }
+                final String fdev = dev == null ? "" : dev.trim();
+                ui.post(() -> {
+                    append("[service] " + fid);
+                    if (!fdev.isEmpty())
+                        append("[设备]' + NL + '" + fdev);
+                    refresh();
+                });
             }, "svc-identity").start();
         }
 
@@ -186,7 +199,7 @@ public class MainActivity extends Activity {
         connectBtn.setText("连接 Shizuku");
         connectBtn.setOnClickListener(v -> connect());
         runBtn = new Button(this);
-        runBtn.setText("推送并运行");
+        runBtn.setText("一键越狱");
         runBtn.setOnClickListener(v -> run());
         Button diagBtn = new Button(this);
         diagBtn.setText("诊断");
