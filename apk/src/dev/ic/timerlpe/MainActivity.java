@@ -47,7 +47,7 @@ public class MainActivity extends Activity {
      * device configuration below was the one that completed the full chain
      * (drop -> setresuid(0,0,0)) end to end, so it is the only one shipped.
      * Keep the name in sync with assets/. */
-    private static final String SCHEME_ASSET = "run_lpe.sh";
+    private static final String SCHEME_ASSET = "run_core.sh";
 
     /* Root handoff: after the chain reaches uid 0 the payload can hand that
      * root to a KernelSU-family manager with the manager's own ksud

@@ -28,6 +28,7 @@
  * locally booted with qemu-system-aarch64 -M virt.  All values below were
  * re-derived from testdata/download_kernel.Image itself. */
 #define IC_PROFILE_NAME "qemu-iqoo12-6.1.145"
+#define PROFILE_KERNEL_MATCH "6.1.145-android14"
 
 /* do_timer_create: posix_timers_cache alloc, return site 0x1a12ac. */
 #define STATIC_TIMER_SITE 0xffffffc0081a12acULL
@@ -87,6 +88,7 @@
 /* vivo PD2571, 6.1.145-android14-11-maybe-dirty (reference device of the
  * upstream port this core was vendored from). */
 #define IC_PROFILE_NAME "pd2571-6.1.145"
+#define PROFILE_KERNEL_MATCH "6.1.145-android14"
 
 #define STATIC_TIMER_SITE 0xffffffc0081a1a0cULL
 #define TIMER_SITE_LOW21 0x1a1a0cULL

