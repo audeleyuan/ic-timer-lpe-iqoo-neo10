@@ -2987,7 +2987,8 @@ int main(int argc, char **argv)
     if (argc > 1 && !strcmp(argv[1], "sites")) {
         setvbuf(stdout, NULL, _IONBF, 0);
         pin(g_cpu);
-        logf("[+] pid=%d cpu=%d\n", getpid(), g_cpu);
+        logf("[core] built %s %s\n", __DATE__, __TIME__);
+    logf("[+] pid=%d cpu=%d\n", getpid(), g_cpu);
         dump_sites();
         return 0;
     }
