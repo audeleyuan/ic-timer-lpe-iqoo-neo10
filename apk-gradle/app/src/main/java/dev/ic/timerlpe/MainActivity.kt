@@ -167,6 +167,8 @@ class MainActivity : ComponentActivity() {
     private var safeMode by mutableStateOf(false)
     private var tab by mutableStateOf(AppTab.HOME)
     private var showManual by mutableStateOf(false)
+    private var runStage by mutableStateOf("")
+    private var runStageIndex = -1
 
     private var service: IIcService? = null
     private var logPath: String? = null
@@ -391,7 +393,8 @@ class MainActivity : ComponentActivity() {
                     item {
                         TextButton(
                             text = when {
-                                busy -> "运行中…"
+                                busy -> runStage.ifBlank { "运行中…" }
+                                runStage.isNotEmpty() -> runStage
                                 !binderReady -> "Shizuku 未运行（点击打开）"
                                 !authorized -> "授权 Shizuku"
                                 else -> "一键越狱"
@@ -1285,6 +1288,8 @@ class MainActivity : ComponentActivity() {
             (if (handoff != null) "\nIC_KSU=1" else "")
 
         busy = true
+        runStageIndex = 0
+        runStage = "1/${RUN_STAGES.size} ${RUN_STAGES.first().first}"
         runStamp = stamp
         lifecycleScope.launch {
             val refused = withContext(Dispatchers.IO) {
@@ -1330,8 +1335,12 @@ class MainActivity : ComponentActivity() {
                     true
                 }
             }
-            if (refused) busy = false
-            busy = false
+            /* busy stays true until the core prints "[core] exit=" so the
+             * button keeps showing the live stage for the whole run. */
+            if (refused) {
+                busy = false
+                runStage = ""
+            }
         }
     }
 
@@ -1396,6 +1405,7 @@ class MainActivity : ComponentActivity() {
             addLog("服务未连接：先点“授权 Shizuku”")
             return
         }
+        runStage = ""
         busy = true
         lifecycleScope.launch {
             val out = withContext(Dispatchers.IO) {
@@ -1534,9 +1544,38 @@ class MainActivity : ComponentActivity() {
         val complete = partialLine.substring(0, cut)
         partialLine.delete(0, cut + 1)
         complete.split('\n').forEach { line ->
-            if (line.isNotEmpty()) logs.add(line)
+            if (line.isNotEmpty()) {
+                logs.add(line)
+                updateStage(line)
+            }
         }
         while (logs.size > MAX_LOG_LINES) logs.removeAt(0)
+    }
+
+    /**
+     * Maps the core's log lines onto RUN_STAGES so the main button can show
+     * the live phase.  Only forward moves count: most stages retry, and the
+     * "plant" lines of a later stage repeat earlier text.
+     */
+    private fun updateStage(line: String) {
+        if (line.contains("[core] exit=")) {
+            val rc = line.substringAfter("[core] exit=").trim()
+            runStage = if (rc == "0") "完成" else "失败（exit=$rc）"
+            busy = false
+            // Keep the outcome on the button for a moment, then go back idle.
+            lifecycleScope.launch {
+                delay(4000)
+                if (!busy) runStage = ""
+            }
+            return
+        }
+        if (!busy) return
+        RUN_STAGES.forEachIndexed { idx, stage ->
+            if (idx > runStageIndex && stage.second.any { line.contains(it) }) {
+                runStageIndex = idx
+                runStage = "${idx + 1}/${RUN_STAGES.size} ${stage.first}"
+            }
+        }
     }
 
     private val partialLine = StringBuilder()
@@ -1556,6 +1595,22 @@ class MainActivity : ComponentActivity() {
         private const val DEFAULT_CMD =
             "id; cat /proc/self/attr/current; getenforce; echo LPE-PROOF"
         private const val SCHEME_ASSET = "run_core.sh"
+
+        /** Ordered phases of a run; the button shows "<n>/<total> <label>". */
+        private val RUN_STAGES: List<Pair<String, List<String>>> = listOf(
+            "启动" to listOf("[core] start"),
+            "环境检查" to listOf("[anchors]", "[syms]"),
+            "校准内存" to listOf("[ids] trace", "[base] made"),
+            "泄漏 cred" to listOf("[leak] child exec"),
+            "定位 cred" to listOf("[cred] attempt="),
+            "设置 SELinux" to listOf("stage selinux", "set SELinux permissive"),
+            "零写 vr.ko" to listOf("vr: nulling", "stage vr_sys_exit_funcs"),
+            "伪造 cred" to listOf("stage fake_cred"),
+            "提权 uid" to listOf("stage fake_uid"),
+            "提权 euid" to listOf("stage fake_euid"),
+            "执行 payload" to listOf("exec payload", "[fullshell]", "plant verified"),
+            "完成" to listOf("handoff OK", "ROOT_SHELL_OK"),
+        )
 
         private val KSU_NAMES = listOf(
             "自动检测", "KernelSU", "KernelSU-Next", "SukiSU Ultra",
