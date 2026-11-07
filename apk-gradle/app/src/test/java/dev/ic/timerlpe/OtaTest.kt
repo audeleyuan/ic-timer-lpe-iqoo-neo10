@@ -49,6 +49,19 @@ class OtaTest {
         }
     }
 
+    @Test
+    fun readsBootFingerprintAndKernel() {
+        val path = System.getenv("IC_BOOT_IMG") ?: return
+        val f = File(path)
+        assumeTrue("missing $path", f.exists())
+        FileChannel.open(f.toPath(), java.nio.file.StandardOpenOption.READ).use { ch ->
+            val fp = scanAsciiValue(ch, ch.size(), "com.android.build.boot.fingerprint")
+            println("fingerprint=$fp")
+            assertTrue("has fingerprint", fp != null && fp.contains("vivo/PD2352/PD2352"))
+            assertEquals("6.1.145-android14-11-maybe-dirty", scanKernelBanner(ch, ch.size()))
+        }
+    }
+
     private fun md5(b: ByteArray): String =
         MessageDigest.getInstance("MD5").digest(b).joinToString("") { "%02x".format(it) }
 }

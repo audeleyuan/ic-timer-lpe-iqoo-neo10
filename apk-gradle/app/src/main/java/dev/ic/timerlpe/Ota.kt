@@ -424,6 +424,93 @@ internal object BootExtractor {
 /* small binary helpers                                                */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Finds a bootconfig key in a boot image and returns its value.  Boot v3/v4
+ * images carry the build fingerprint written by the build system as
+ * "<key>\0<value>\0", which lets the App tell whether a boot.img belongs to
+ * the running system without needing the whole OTA package.
+ */
+internal fun scanAsciiValue(ch: FileChannel, size: Long, key: String): String? {
+    val k = key.toByteArray(Charsets.US_ASCII)
+    val chunk = 4L * 1024 * 1024
+    val overlap = k.size + 512
+    var pos = 0L
+    var carry = ByteArray(0)
+    while (pos < size) {
+        val want = minOf(chunk, size - pos).toInt()
+        val buf = readAt(ch, pos, want)
+        if (buf.isEmpty()) break
+        val data = if (carry.isEmpty()) buf else carry + buf
+        val idx = indexOfBytes(data, k)
+        if (idx >= 0) {
+            var i = idx + k.size
+            if (i < data.size && (data[i] == '='.code.toByte())) i++
+            if (i < data.size && data[i].toInt() == 0) i++
+            var stop = i
+            while (stop < data.size && data[stop].toInt() != 0) stop++
+            if (stop > i) {
+                return String(data, i, stop - i, Charsets.US_ASCII).trim()
+            }
+        }
+        carry = if (data.size > overlap) {
+            data.copyOfRange(data.size - overlap, data.size)
+        } else {
+            data
+        }
+        pos += want
+    }
+    return null
+}
+
+/** Reads the "Linux version <release>" token from an uncompressed kernel. */
+internal fun scanKernelBanner(ch: FileChannel, size: Long): String? {
+    val k = "Linux version ".toByteArray(Charsets.US_ASCII)
+    val chunk = 4L * 1024 * 1024
+    val overlap = k.size + 128
+    var pos = 0L
+    var carry = ByteArray(0)
+    while (pos < size) {
+        val want = minOf(chunk, size - pos).toInt()
+        val buf = readAt(ch, pos, want)
+        if (buf.isEmpty()) break
+        val data = if (carry.isEmpty()) buf else carry + buf
+        val idx = indexOfBytes(data, k)
+        if (idx >= 0) {
+            var i = idx + k.size
+            val start = i
+            while (i < data.size) {
+                val c = data[i].toInt() and 0xff
+                if (c == 0 || c == ' '.code || c == '\n'.code || c == '\r'.code) break
+                i++
+            }
+            if (i > start) return String(data, start, i - start, Charsets.US_ASCII)
+        }
+        carry = if (data.size > overlap) {
+            data.copyOfRange(data.size - overlap, data.size)
+        } else {
+            data
+        }
+        pos += want
+    }
+    return null
+}
+
+private fun indexOfBytes(hay: ByteArray, needle: ByteArray): Int {
+    if (needle.isEmpty() || hay.size < needle.size) return -1
+    val first = needle[0]
+    var i = 0
+    val limit = hay.size - needle.size
+    while (i <= limit) {
+        if (hay[i] == first) {
+            var j = 1
+            while (j < needle.size && hay[i + j] == needle[j]) j++
+            if (j == needle.size) return i
+        }
+        i++
+    }
+    return -1
+}
+
 internal fun readAt(ch: FileChannel, off: Long, len: Int): ByteArray {
     val out = ByteArray(len)
     val bb = ByteBuffer.wrap(out)

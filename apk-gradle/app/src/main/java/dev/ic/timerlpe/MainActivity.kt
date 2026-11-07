@@ -1534,6 +1534,7 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                     if (size <= 64) throw ParseAbort("boot 镜像大小异常（$size bytes）")
+                    checkBootIdentity(ch, size, ::note)
                     val pushed = pushChannel(s, img, ch, 0, size)
                     note("[解析] 已推送 boot.img: $pushed bytes")
                 }
@@ -1558,6 +1559,64 @@ class MainActivity : ComponentActivity() {
             } catch (_: Throwable) {
             }
         }
+    }
+
+    private data class Fingerprint(
+        val vendor: String,
+        val device: String,
+        val incremental: String,
+    )
+
+    private fun parseFingerprint(s: String): Fingerprint? {
+        val parts = s.split('/')
+        if (parts.size < 5) return null
+        val inc = parts[4].substringBefore(':')
+        if (parts[0].isBlank() || parts[1].isBlank() || inc.isBlank()) return null
+        return Fingerprint(parts[0].trim(), parts[1].trim(), inc.trim())
+    }
+
+    /**
+     * Tells whether a bare boot.img belongs to this device *without* the OTA
+     * package: boot v3/v4 images carry the build fingerprint
+     * (com.android.build.boot.fingerprint) written at build time, which shares
+     * vendor/device/incremental with ro.build.fingerprint.  Falls back to the
+     * kernel version banner when the image has no bootconfig.
+     */
+    private fun checkBootIdentity(ch: FileChannel, size: Long, note: (String) -> Unit) {
+        val imgFpStr = scanAsciiValue(ch, size, "com.android.build.boot.fingerprint")
+        val devFpStr = getSystemProperty("ro.build.fingerprint")
+        val imgFp = imgFpStr?.let { parseFingerprint(it) }
+        val devFp = parseFingerprint(devFpStr)
+        if (imgFp != null && devFp != null) {
+            note("[解析] boot 指纹: $imgFpStr")
+            note("[解析] 本机指纹: $devFpStr")
+            val same = imgFp.vendor.equals(devFp.vendor, ignoreCase = true) &&
+                imgFp.device.equals(devFp.device, ignoreCase = true) &&
+                imgFp.incremental == devFp.incremental
+            if (!same) {
+                throw ParseAbort(
+                    "所选 boot.img 与本机不是同一个 build。\n\n" +
+                        "镜像：${imgFp.vendor}/${imgFp.device} … ${imgFp.incremental}\n" +
+                        "本机：${devFp.vendor}/${devFp.device} … ${devFp.incremental}\n\n" +
+                        "请选择当前系统对应的 boot.img 或全量包。"
+                )
+            }
+            note("[解析] 版本校验通过（boot 指纹一致）")
+            return
+        }
+        val banner = scanKernelBanner(ch, size)
+        if (banner != null) {
+            note("[解析] 镜像内核: $banner，本机内核: $kernelVersion")
+            if (banner != kernelVersion && !kernelVersion.contains(banner)) {
+                throw ParseAbort(
+                    "boot.img 的内核（$banner）与本机内核（$kernelVersion）不一致。\n\n" +
+                        "请选择当前系统对应的 boot.img 或全量包。"
+                )
+            }
+            note("[解析] 版本校验通过（仅内核版本）")
+            return
+        }
+        note("[解析] 无法从 boot.img 读取 build 指纹或内核版本，跳过版本校验")
     }
 
     private fun extractFromZip(
