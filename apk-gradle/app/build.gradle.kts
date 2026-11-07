@@ -22,8 +22,8 @@ android {
         applicationId = "dev.ic.timerlpe"
         minSdk = 33
         targetSdk = 37
-        versionCode = 170
-        versionName = "0.17.0"
+        versionCode = 180
+        versionName = "0.18.0"
         ndk {
             abiFilters.add("arm64-v8a")
         }
@@ -64,7 +64,11 @@ android {
 
 dependencies {
     testImplementation("junit:junit:4.13.2")
-    implementation("io.airlift:aircompressor:0.27")
+    /* Patched locally: upstream 0.27 reads sun.misc.Unsafe.ARRAY_BYTE_BASE_OFFSET,
+     * a constant newer Android ART no longer ships (NoSuchFieldError while
+     * decompressing OTA payload zstd chunks).  The field owner is rewritten to
+     * dev.ic.timerlpe.UnsafeCompat; see libs/README.md. */
+    implementation(files("libs/aircompressor-0.27-android.jar"))
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.compose.ui:ui")

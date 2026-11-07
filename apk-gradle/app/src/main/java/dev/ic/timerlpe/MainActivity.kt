@@ -180,6 +180,8 @@ class MainActivity : ComponentActivity() {
     private var logOff = 0
     private var polling = false
     private var runStamp = ""
+    /** Which step of the boot.img parser was running when it failed. */
+    private var parseStage = "读取文件"
 
     private val prefs by lazy { getSharedPreferences("ic_timer", MODE_PRIVATE) }
 
@@ -1234,7 +1236,7 @@ class MainActivity : ComponentActivity() {
                 .processNameSuffix(":icsvc")
             Shizuku.bindUserService(args, conn)
             addLog("正在绑定 shell 用户服务…")
-        }.onFailure { addLog("绑定失败: $it") }
+        }.onFailure { addLog("绑定失败：\n" + explainError(it, "绑定 Shizuku 用户服务")) }
     }
 
     private fun openManager() {
@@ -1320,33 +1322,32 @@ class MainActivity : ComponentActivity() {
     private fun managerInstalled(pkg: String): Boolean =
         runCatching { packageManager.getPackageInfo(pkg, 0) }.isSuccess
 
-    private fun anyManagerInstalled(): Boolean =
-        KSU_PKGS.any { it.isNotEmpty() && managerInstalled(it) }
+    /**
+     * Android 11+ hides packages from apps unless they are declared in
+     * <queries> (or QUERY_ALL_PACKAGES is held).  The shell user that Shizuku
+     * gives us sees every installed package, so it is the reliable fallback
+     * and also covers managers whose id we do not know yet.
+     */
+    private fun installedPackagesShell(s: IIcService): Set<String> =
+        runCatching {
+            s.runCmd("pm list packages 2>/dev/null")
+                .lineSequence()
+                .map { it.trim().removePrefix("package:") }
+                .filter { it.isNotEmpty() }
+                .toSet()
+        }.getOrDefault(emptySet())
+
+    private fun managerPresent(pkg: String, shell: Set<String>): Boolean =
+        pkg.isNotEmpty() && (
+            managerInstalled(pkg) ||
+                pkg in shell ||
+                (KSU_ALIASES[pkg] ?: emptyList()).any { managerInstalled(it) || it in shell }
+            )
 
     private fun runCore() {
         val s = requireService("运行") ?: return
-        val ksuPkg = KSU_PKGS[ksuIndex]
-        /* The endgame hands root to a manager's own ksud; without one there
-         * is nothing to hand off to, so ask before starting anything. */
-        if (ksuPkg.isNotEmpty()) {
-            if (!managerInstalled(ksuPkg)) {
-                notice = Notice(
-                    "未检测到 ROOT 管理器",
-                    "所选的管理器「${KSU_NAMES[ksuIndex]}」（$ksuPkg）没有安装。\n\n" +
-                        "请先安装对应的管理器 APK，或在「ROOT管理器」里改选「自动检测」。"
-                )
-                return
-            }
-        } else if (!anyManagerInstalled()) {
-            notice = Notice(
-                "未检测到 ROOT 管理器",
-                "没有检测到任何 KernelSU 系列管理器。\n\n" +
-                    "本工具在拿到 root 后要把 root 交给管理器（由管理器自己的内核模块" +
-                    "late-load 完成），所以需要先安装 KernelSU / KernelSU-Next / " +
-                    "SukiSU Ultra / BakaSU / SukiSU 等之一，再点一键越狱。"
-            )
-            return
-        }
+        val selectedPkg = KSU_PKGS[ksuIndex]
+        val selectedName = KSU_NAMES[ksuIndex]
         val safe = safeMode
         val stamp = (System.currentTimeMillis() / 1000).toString()
         val bin = "$TMP/ic-timer-a$stamp"
@@ -1356,7 +1357,6 @@ class MainActivity : ComponentActivity() {
          * the KSU handoff, and an empty package means "auto-detect". */
         val handoff = "$TMP/ksu-h$stamp.sh"
         val proof = DEFAULT_CMD
-        val payload = "sh $handoff '$ksuPkg' '' '${if (safe) "1" else "0"}' ; $proof"
         val extraEnv = "IC_SYMS_FILE=/data/local/tmp/ic-syms.txt" +
             (if (safe) "\nIC_SAFE_MODE=1" else "") +
             "\nIC_KSU=1"
@@ -1376,6 +1376,36 @@ class MainActivity : ComponentActivity() {
                         )
                         return@withContext true
                     }
+                    /* The endgame hands root to a manager's own ksud; without
+                     * one there is nothing to hand off to, so ask before
+                     * starting anything.  The check is done from the shell,
+                     * not only from the app: package visibility would hide
+                     * every manager from an app targeting Android 11+. */
+                    val shellPkgs = installedPackagesShell(s)
+                    val selectedOk = managerPresent(selectedPkg, shellPkgs)
+                    if (KSU_PKGS.none { managerPresent(it, shellPkgs) }) {
+                        postUi {
+                            notice = Notice(
+                                "未检测到 ROOT 管理器",
+                                "没有在手机上找到 KernelSU 系列管理器。"
+                            )
+                        }
+                        return@withContext true
+                    }
+                    /* The selected manager is optional: the handoff script
+                     * tries every installed manager anyway.  When the selected
+                     * one is missing, fall back to auto-detect instead of
+                     * refusing a run that would actually have succeeded. */
+                    val ksuPkg = if (selectedPkg.isEmpty() || selectedOk) selectedPkg else ""
+                    if (selectedPkg.isNotEmpty() && !selectedOk) {
+                        addLogOnMain(
+                            "[run] 所选管理器「$selectedName」($selectedPkg) 未安装，" +
+                                "自动改用已安装的管理器"
+                        )
+                    }
+                    val payload =
+                        "sh $handoff '$ksuPkg' '' '${if (safe) "1" else "0"}' ; $proof"
+
                     s.truncate(script)
                     push(s, SCHEME_ASSET, script)
                     s.makeExec(script)
@@ -1422,7 +1452,7 @@ class MainActivity : ComponentActivity() {
                     startPolling()
                     false
                 } catch (t: Throwable) {
-                    addLogOnMain("[run] 失败: $t")
+                    addLogOnMain("[run] 失败：\n" + explainError(t, "运行提权链"))
                     true
                 }
             }
@@ -1477,7 +1507,7 @@ class MainActivity : ComponentActivity() {
                             "grep -Ei 'kernelsu|sukisu|resukisu|bakasu|sakisu|" +
                             "sevenk|vivoksu|ksunext|fina'"
                     )
-                }.getOrElse { "诊断失败: $it" }
+                }.getOrElse { "诊断失败：\n" + explainError(it, "诊断") }
             }
             addLog("[诊断]\n$out")
         }
@@ -1487,7 +1517,7 @@ class MainActivity : ComponentActivity() {
         requireService("解析偏移") ?: return
         runCatching {
             parsePicker.launch(arrayOf("*/*"))
-        }.onFailure { addLog("[解析偏移] 无法打开文件选择器: $it") }
+        }.onFailure { addLog("[解析偏移] 无法打开文件选择器：\n" + explainError(it, "打开文件选择器")) }
     }
 
     /** Thrown when the picked file cannot be used; the message goes to a dialog. */
@@ -1507,21 +1537,61 @@ class MainActivity : ComponentActivity() {
                 if (!out.contains("parse_rc=0")) {
                     val tail = out.lines().filter { it.isNotBlank() }.takeLast(14)
                         .joinToString("\n")
-                    notice = Notice("解析失败", "没有生成符号表。\n\n$tail")
+                    notice = Notice(
+                        "解析失败",
+                        "没有生成符号表（解析器返回非 0）。\n\n" +
+                            "常见原因：所选镜像与本机内核版本不一致，或这个内核构建" +
+                            "暂时不被解析器支持。\n\n最后几行日志：\n$tail"
+                    )
                 }
             } catch (a: ParseAbort) {
                 addLog("[解析偏移] ${a.message}")
                 notice = Notice("无法解析", a.message ?: "未知错误")
             } catch (t: Throwable) {
-                addLog("[解析偏移] 失败: $t")
-                notice = Notice("解析失败", "读取或解析所选文件时出错：\n$t")
+                val why = explainError(t)
+                addLog("[解析偏移] 失败（$parseStage）：\n$why")
+                notice = Notice("解析失败", why)
             } finally {
                 busy = false
             }
         }
     }
 
+    /**
+     * Every user-visible failure gets a plain-Chinese explanation first; the
+     * raw exception stays at the end so bug reports still carry the detail.
+     */
+    private fun explainError(t: Throwable, stage: String = parseStage): String {
+        val detail = t.message?.takeIf { it.isNotBlank() } ?: t.javaClass.name
+        val hint = when {
+            t is NoSuchFieldError || t is NoSuchMethodError ->
+                "系统运行库与工具里的压缩组件不兼容：新版 Android 移除了旧的 Java " +
+                    "内部接口，导致全量包解压失败。\n这既不是固件问题，也不是操作问题。" +
+                    "请先把这张截图反馈给作者；临时可以改用电脑上的 tool/parse_offsets.py，" +
+                    "或直接选择已解出的 boot.img。"
+            t is OutOfMemoryError ->
+                "手机内存不足。全量包解压需要较多内存，请改用电脑上的 " +
+                    "tool/parse_offsets.py，或只选择 boot.img（不是全量包）。"
+            t is SecurityException ->
+                "没有读取所选文件的权限。请把文件复制到「下载」目录后重新选择。"
+            t is java.io.FileNotFoundException ->
+                "文件不存在或已经打不开，可能被移动、删除或没有读取权限，请重新选择。"
+            t is java.nio.channels.ClosedChannelException ->
+                "文件读取被中断（文件可能被其他应用占用或选择器已关闭），请重新选择。"
+            t is java.util.zip.ZipException ->
+                "压缩包结构损坏或不完整，请重新下载全量包。"
+            t is java.io.IOException ->
+                "读取文件时出错：$detail\n请确认文件完整（拷到「下载」目录后重试）。"
+            t is IllegalArgumentException ->
+                "文件内容不符合预期：$detail"
+            else ->
+                "读取或解析时出现未预期的错误：$detail"
+        }
+        return "$hint\n\n出错位置：$stage\n技术信息：${t.javaClass.simpleName}: $detail"
+    }
+
     private fun runParse(s: IIcService, uri: Uri, name: String): String {
+        parseStage = "打开所选文件"
         val stamp = (System.currentTimeMillis() / 1000).toString()
         val bin = "$TMP/ic-syms-a$stamp"
         val img = "$TMP/ic-boot-a$stamp.img"
@@ -1547,6 +1617,7 @@ class MainActivity : ComponentActivity() {
                 head.size >= 4 && head[0] == 'P'.code.toByte() &&
                     head[1] == 'K'.code.toByte() -> {
                     note("[解析] 类型: ZIP（全量包）")
+                    parseStage = "从全量包解压 boot 分区"
                     extractFromZip(s, ch, size, img, ::note)
                 }
                 head.size >= 8 && String(head, 0, 8, Charsets.US_ASCII) == "ANDROID!" -> {
@@ -1554,6 +1625,7 @@ class MainActivity : ComponentActivity() {
                     val ksize = u32(hdr, 8)
                     val hver = u32(hdr, 40)
                     note("[解析] 类型: Android boot 镜像 v$hver，内核 $ksize bytes")
+                    parseStage = "解析 boot 镜像"
                     if (ksize == 0L) {
                         throw ParseAbort(
                             "所选镜像是 init_boot / vendor_boot（不含内核），无法解析偏移。\n\n" +
@@ -1570,6 +1642,7 @@ class MainActivity : ComponentActivity() {
                         "或全量 OTA 包（.zip）。\n\ninit_boot / vendor_boot / 其他镜像都不支持。"
                 )
             }
+            parseStage = "生成符号表"
             val r = s.runCmd(
                 "ls -l $img 2>&1; $bin syms $img $syms 2>&1; " +
                     "echo parse_rc=$?; sed -n '1,3p' $syms 2>/dev/null; rm -f $img"
@@ -1765,7 +1838,7 @@ class MainActivity : ComponentActivity() {
                             "echo ---; ls -l /data/local/tmp/ 2>/dev/null | " +
                             "grep -E 'ic-|ksu|payload' | head -20"
                     )
-                }.getOrElse { "清理失败: $it" }
+                }.getOrElse { "清理失败：\n" + explainError(it, "清理临时文件") }
             }
             addLog("[清理] 本工具临时文件\n$out")
             Toast.makeText(
@@ -1911,7 +1984,7 @@ class MainActivity : ComponentActivity() {
                     s.makeExec(script)
                     s.runCmd("sh $script --logs" + (if (apk) " --apk" else "") + " 2>&1")
                 } catch (t: Throwable) {
-                    "清理失败: $t"
+                    "清理失败：\n" + explainError(t, "清理临时文件")
                 }
             }
             addLog("[清理]\n$out")
@@ -2017,13 +2090,23 @@ class MainActivity : ComponentActivity() {
 
         private val KSU_NAMES = listOf(
             "自动检测", "KernelSU", "KernelSU-Next", "SukiSU Ultra",
-            "BakaSU", "ReSukiSU (旧包名)", "SakiSU", "FinaSU", "7kimisu"
+            "BakaSU", "ReSukiSU (旧包名)", "SakiSU", "FinaSU", "7kimisu",
+            "7kimisu (备用包名)", "vivoKSU"
         )
+        /* Keep this list in step with KNOWN in assets/ksu_handoff.sh: the
+         * script can only hand off to managers it knows, so a manager that
+         * is missing here is also unreachable there. 7kimisu ships two ids. */
         private val KSU_PKGS = listOf(
             "",
             "me.weishu.kernelsu", "com.rifsxd.ksunext", "com.sukisu.ultra",
             "org.bakasu.bakasu", "com.resukisu.resukisu",
-            "com.sakisu.sakisu", "me.yuki.fina", "com.sevenk.core"
+            "com.sakisu.sakisu", "me.yuki.fina", "com.sevenk.core",
+            "com.sevenkimimasy.love", "me.inkdye.vivoksu"
+        )
+        /** Selecting one id of a two-id manager also accepts the other id. */
+        private val KSU_ALIASES = mapOf(
+            "com.sevenk.core" to listOf("com.sevenkimimasy.love"),
+            "com.sevenkimimasy.love" to listOf("com.sevenk.core")
         )
 
         private val licenseItems = listOf(
