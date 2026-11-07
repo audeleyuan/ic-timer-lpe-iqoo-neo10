@@ -479,7 +479,7 @@ class MainActivity : ComponentActivity() {
                             Column {
                                 ArrowPreference(
                                     title = "解析偏移",
-                                    summary = "从 boot.img 解析偏移",
+                                    summary = "从全量包或boot.img解析偏移",
                                     onClick = { parseOffsets() },
                                     startAction = {
                                         Icon(
@@ -1328,14 +1328,14 @@ class MainActivity : ComponentActivity() {
                     if (haveCore == null) {
                         postUi {
                             offsetPrompt = "无法确认当前版本的内核偏移（内核可能不受支持）。\n\n" +
-                                "请点「解析偏移」，选择该机型的 boot.img 生成符号表。"
+                                "请点「解析偏移」，选择该机型的 boot.img 或全量包生成符号表。"
                         }
                         return@withContext true
                     }
                     if (haveCore != "1" || haveFake != "1") {
                         postUi {
                             offsetPrompt = "没有当前版本的偏移，请手动解析偏移。\n\n" +
-                                "点「解析偏移」选择该机型的 boot.img，生成 " +
+                                "点「解析偏移」选择该机型的 boot.img 或全量包，生成 " +
                                 "/data/local/tmp/ic-syms.txt 后再点一键越狱。"
                         }
                         return@withContext true
