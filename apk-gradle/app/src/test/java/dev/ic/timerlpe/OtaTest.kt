@@ -108,6 +108,29 @@ class OtaTest {
         }
     }
 
+    @Test
+    fun urlExtractorAnyOta() {
+        val url = System.getenv("IC_OTA_URL_ANY") ?: return
+        val dir = java.nio.file.Files.createTempDirectory("ota-any").toFile()
+        val logs = StringBuilder()
+        val img = kotlinx.coroutines.runBlocking {
+            OtaUrlExtractor.extractBoot(url, dir) { logs.append(it).append('\n') }
+        }
+        try {
+            println(logs)
+            val buf = img.readBytes()
+            println(
+                "boot size=${buf.size} md5=${md5(buf)} head=" +
+                    String(buf, 0, 8, Charsets.US_ASCII)
+            )
+            assertEquals("ANDROID!", String(buf, 0, 8, Charsets.US_ASCII))
+            assertTrue("kernel size > 0", u32(buf, 8) > 0)
+        } finally {
+            img.delete()
+            dir.delete()
+        }
+    }
+
     private fun md5(b: ByteArray): String =
         MessageDigest.getInstance("MD5").digest(b).joinToString("") { "%02x".format(it) }
 }
