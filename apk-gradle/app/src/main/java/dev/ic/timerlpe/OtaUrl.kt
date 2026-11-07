@@ -24,7 +24,7 @@ import kotlin.math.min
 
 object OtaUrlExtractor {
     private const val HEADER_SIZE = 24
-    private const val END_BYTES_SIZE = 65536
+    private const val END_BYTES_SIZE = 1 shl 20
     private const val LOCAL_HEADER_PROBE_SIZE = 256
     private const val MAX_MANIFEST_SIZE = 64L shl 20
 

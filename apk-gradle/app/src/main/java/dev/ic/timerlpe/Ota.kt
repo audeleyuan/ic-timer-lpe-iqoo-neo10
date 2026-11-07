@@ -102,7 +102,7 @@ internal class ZipReader(private val ch: FileChannel, private val fileSize: Long
     }
 
     private fun findEocd(): Long {
-        val tailLen = minOf(fileSize, 65557L).toInt()
+        val tailLen = minOf(fileSize, 1L shl 20).toInt()
         val tail = readAt(ch, fileSize - tailLen, tailLen)
         var i = tail.size - 22
         while (i >= 0) {
