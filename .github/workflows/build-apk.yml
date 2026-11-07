@@ -18,16 +18,23 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
+      # android-actions/setup-android@v3 still runs `sdkmanager tools`, and
+      # that package no longer exists (the action dies before installing
+      # anything). The ubuntu runner already ships cmdline-tools, so use its
+      # sdkmanager directly.
       - name: Install SDK packages
-        run: sdkmanager --install "platforms;android-37.0" "build-tools;37.0.0" "platform-tools"
+        run: |
+          SDKMANAGER="$(command -v sdkmanager || true)"
+          if [ -z "$SDKMANAGER" ]; then
+            SDKMANAGER="$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | head -n1)"
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" --install "platforms;android-37.0" "build-tools;37.0.0" "platform-tools"
 
       # The repository keeps a local-only aapt2 path for the author's machine;
       # CI resolves aapt2 from Maven instead.
