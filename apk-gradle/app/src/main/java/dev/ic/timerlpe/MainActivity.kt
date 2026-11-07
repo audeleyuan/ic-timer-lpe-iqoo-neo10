@@ -173,6 +173,7 @@ class MainActivity : ComponentActivity() {
     private var runStageIndex = -1
     private var offsetPrompt by mutableStateOf<String?>(null)
     private var notice by mutableStateOf<Notice?>(null)
+    private var showDonate by mutableStateOf(false)
 
     private var service: IIcService? = null
     private var logPath: String? = null
@@ -269,6 +270,7 @@ class MainActivity : ComponentActivity() {
         kernelVersion = runCatching { android.system.Os.uname().release }.getOrDefault("未知")
         deviceModel = resolveDeviceName()
         refreshStaticState()
+        checkDeviceAndKernel()
         if (authorized && binderReady) bindUserService()
 
         setContent {
@@ -301,6 +303,7 @@ class MainActivity : ComponentActivity() {
                         CleanupDialog()
                         OffsetPromptDialog()
                         NoticeDialog()
+                        DonateDialog(show = showDonate, onDismiss = { showDonate = false })
                         AnimatedVisibility(
                             visible = showManual,
                             enter = slideInHorizontally(tween(240)) { it } + fadeIn(tween(240)),
@@ -465,6 +468,20 @@ class MainActivity : ComponentActivity() {
                                     startAction = {
                                         Icon(
                                             imageVector = Icons.Filled.MenuBook,
+                                            contentDescription = null,
+                                            modifier = Modifier.padding(end = 6.dp),
+                                            tint = COUITheme.colorScheme.onBackground
+                                        )
+                                    }
+                                )
+                                HorizontalDivider()
+                                ArrowPreference(
+                                    title = "支持开发者",
+                                    summary = "赞赏二维码",
+                                    onClick = { showDonate = true },
+                                    startAction = {
+                                        Icon(
+                                            imageVector = Icons.Filled.Favorite,
                                             contentDescription = null,
                                             modifier = Modifier.padding(end = 6.dp),
                                             tint = COUITheme.colorScheme.onBackground
@@ -788,7 +805,6 @@ class MainActivity : ComponentActivity() {
         onLicenses: () -> Unit
     ) {
         val uriHandler = LocalUriHandler.current
-        var showDonate by remember { mutableStateOf(false) }
         Scaffold(
             contentWindowInsets = WindowInsets.systemBars.only(WindowInsetsSides.Top),
             topBar = {
@@ -918,7 +934,6 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-        DonateDialog(show = showDonate, onDismiss = { showDonate = false })
     }
 
     @Composable
@@ -1255,6 +1270,35 @@ class MainActivity : ComponentActivity() {
         "disabled" -> "disabled"
         "" -> "未知"
         else -> raw.trim()
+    }
+
+    /**
+     * The chain was only validated on vivo/iQOO 6.1.145 kernels.  Anything
+     * else gets a startup notice (not a hard block): the tool still runs, but
+     * the user is told the result is not expected to be meaningful.
+     */
+    private fun checkDeviceAndKernel() {
+        val brand = getSystemProperty("ro.product.brand")
+        val manufacturer = getSystemProperty("ro.product.manufacturer")
+        val vendor = "$brand $manufacturer".lowercase()
+        val isVivo = vendor.contains("vivo") || vendor.contains("iqoo")
+        val kernelOk = kernelVersion.contains("6.1.145")
+        if (isVivo && kernelOk) return
+        val reasons = buildList {
+            if (!isVivo) add("不是 vivo / iQOO 设备（${brand.ifBlank { manufacturer }}）")
+            if (!kernelOk) add("内核不是 6.1.145（$kernelVersion）")
+        }
+        notice = Notice(
+            "设备提示",
+            buildString {
+                append("本工具只适配 vivo / iQOO 且内核为 6.1.145 的机型。\n\n")
+                append("检测到：\n· ")
+                append(reasons.joinToString("\n· "))
+                append("\n\n仍然可以继续使用，但提权大概率无效，")
+                append("也可能因为错误的地址写入导致设备异常。请自行确认风险。")
+            }
+        )
+        addLog("[设备] 不在适配范围: ${reasons.joinToString("；")}")
     }
 
     private fun resolveDeviceName(): String = runCatching {

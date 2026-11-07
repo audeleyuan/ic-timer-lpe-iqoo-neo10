@@ -3,6 +3,13 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+/* Local builds sign with the author's keystore; CI either passes
+ * -Pic.keystore=<path> (from a repository secret) or gets an unsigned APK. */
+val keystoreFile = file(
+    (project.findProperty("ic.keystore") as String?)
+        ?: "D:/kwork/icv11/apk/debug.keystore"
+)
+
 android {
     namespace = "dev.ic.timerlpe"
     compileSdk {
@@ -15,8 +22,8 @@ android {
         applicationId = "dev.ic.timerlpe"
         minSdk = 33
         targetSdk = 37
-        versionCode = 141
-        versionName = "0.14.1"
+        versionCode = 150
+        versionName = "0.15.0"
         ndk {
             abiFilters.add("arm64-v8a")
         }
@@ -28,10 +35,10 @@ android {
     }
     signingConfigs {
         create("local") {
-            storeFile = file("D:/kwork/icv11/apk/debug.keystore")
-            storePassword = "android"
-            keyAlias = "ic"
-            keyPassword = "android"
+            storeFile = keystoreFile
+            storePassword = (project.findProperty("ic.storePassword") as String?) ?: "android"
+            keyAlias = (project.findProperty("ic.keyAlias") as String?) ?: "ic"
+            keyPassword = (project.findProperty("ic.keyPassword") as String?) ?: "android"
         }
     }
     buildTypes {
@@ -42,7 +49,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("local")
+            signingConfig = if (keystoreFile.exists()) {
+                signingConfigs.getByName("local")
+            } else {
+                null
+            }
         }
     }
     compileOptions {
