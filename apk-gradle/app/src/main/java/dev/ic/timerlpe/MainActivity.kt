@@ -496,7 +496,7 @@ class MainActivity : ComponentActivity() {
                             Column {
                                 ArrowPreference(
                                     title = "解析偏移",
-                                    summary = "从全量包或boot.img解析偏移",
+                                    summary = "从全量包或 boot.img 解析偏移",
                                     onClick = { parseOffsets() },
                                     startAction = {
                                         Icon(

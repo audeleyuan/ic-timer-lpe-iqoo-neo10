@@ -45,6 +45,11 @@ static const struct ic_extra_syms ic_extra_syms_tab[] = {
      * the fixed deltas from init_user_ns (verified against the image). */
     { "ic_pd2352_162170_links", 0xffffffc00a1f11c8ULL, 0xffffffc00a1f2a78ULL,
       0xffffffc00a1f24e8ULL },
+
+    /* PD2425_A_16.1.17.10 boot.img (banner 6.1.145-android14-11-maybe-dirty,
+     * boot fingerprint vivo/PD2425/PD2425 … compiler260917174806). */
+    { "ic_pd2425_1611710_links", 0xffffffc00a1f11c8ULL, 0xffffffc00a1f2a78ULL,
+      0xffffffc00a1f24e8ULL },
 };
 
 #endif /* IC_EXTRA_SYMS_H */

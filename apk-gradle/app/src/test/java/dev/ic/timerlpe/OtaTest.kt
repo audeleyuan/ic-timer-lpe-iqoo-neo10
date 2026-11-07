@@ -57,7 +57,10 @@ class OtaTest {
         FileChannel.open(f.toPath(), java.nio.file.StandardOpenOption.READ).use { ch ->
             val fp = scanAsciiValue(ch, ch.size(), "com.android.build.boot.fingerprint")
             println("fingerprint=$fp")
-            assertTrue("has fingerprint", fp != null && fp.contains("vivo/PD2352/PD2352"))
+            assertTrue("has fingerprint", fp != null && fp.contains(":user/release-keys"))
+            System.getenv("IC_BOOT_MODEL")?.let { model ->
+                assertTrue("model $model", fp != null && fp.contains("/$model/"))
+            }
             assertEquals("6.1.145-android14-11-maybe-dirty", scanKernelBanner(ch, ch.size()))
         }
     }
