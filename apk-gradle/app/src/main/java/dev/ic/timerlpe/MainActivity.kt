@@ -267,6 +267,9 @@ class MainActivity : ComponentActivity() {
         )
         window.isNavigationBarContrastEnforced = false
         super.onCreate(savedInstanceState)
+        /* libextract.so is staged by the installer in nativeLibraryDir; it is
+         * executed (not dlopen'd) for REPLACE_ZSTD payload operations. */
+        runCatching { ZstdNative.init(File(applicationInfo.nativeLibraryDir), cacheDir) }
         Shizuku.addRequestPermissionResultListener(permissionListener)
         Shizuku.addBinderReceivedListenerSticky(binderListener)
         Shizuku.addBinderDeadListener(binderDeadListener)
@@ -1767,13 +1770,12 @@ class MainActivity : ComponentActivity() {
         val detail = t.message?.takeIf { it.isNotBlank() } ?: t.javaClass.name
         val hint = when {
             t is NoSuchFieldError || t is NoSuchMethodError ->
-                "系统运行库与工具里的压缩组件不兼容：新版 Android 移除了旧的 Java " +
-                    "内部接口，导致全量包解压失败。\n这既不是固件问题，也不是操作问题。" +
-                    "请先把这张截图反馈给作者；临时可以改用电脑上的 tool/parse_offsets.py，" +
-                    "或直接选择已解出的 boot.img。"
+                "全量包里的 zstd 数据无法解码：内置解码器缺失或与当前系统不兼容。" +
+                    "请确认安装的是完整 APK（不要删掉 lib/arm64-v8a/libextract.so），" +
+                    "或重新安装本版本后重试。"
             t is OutOfMemoryError ->
-                "手机内存不足。全量包解压需要较多内存，请改用电脑上的 " +
-                    "tool/parse_offsets.py，或只选择 boot.img（不是全量包）。"
+                "手机内存不足。全量包解压需要较多内存，请先关闭后台应用后重试；" +
+                    "也可以只选择已解出的 boot.img（不是全量包）。"
             t is SecurityException ->
                 "没有读取所选文件的权限。请把文件复制到「下载」目录后重新选择。"
             t is java.io.FileNotFoundException ->
@@ -1955,7 +1957,10 @@ class MainActivity : ComponentActivity() {
         when {
             payload != null -> {
                 if (payload.method != 0) {
-                    throw ParseAbort("payload.bin 在 zip 里是压缩存储，手机端暂不支持；请用电脑的 tool/parse_offsets.py。")
+                    throw ParseAbort(
+                        "payload.bin 在 zip 里是压缩存储，不是官方全量包的格式。" +
+                            "请使用官方全量包（payload.bin 必须为 Stored/未压缩）。"
+                    )
                 }
                 note("[解析] payload.bin: ${payload.compressedSize} bytes @ ${payload.dataOffset}")
                 val plan = BootExtractor.manifest(ch, payload.dataOffset)
@@ -2198,6 +2203,24 @@ class MainActivity : ComponentActivity() {
 
     private fun push(s: IIcService, asset: String, dst: String) {
         assets.open(asset).use { input ->
+            /* Shell assets must reach the phone with LF endings.  A Windows
+             * build machine with core.autocrlf=true ships them with CRLF, and
+             * Android's mksh then fails on the blank line (a lone \r is read
+             * as a command) and on "case ... in\r" ("syntax error: unexpected
+             * 'in'"), which aborts the whole KSU handoff.  Binary assets are
+             * streamed untouched. */
+            if (asset.endsWith(".sh")) {
+                val bytes = input.readBytes().toString(Charsets.UTF_8)
+                    .replace("\r\n", "\n")
+                    .toByteArray(Charsets.UTF_8)
+                var off = 0
+                while (off < bytes.size) {
+                    val n = minOf(CHUNK, bytes.size - off)
+                    s.put(dst, off, bytes.copyOfRange(off, off + n))
+                    off += n
+                }
+                return
+            }
             val buf = ByteArray(CHUNK)
             var off = 0
             while (true) {

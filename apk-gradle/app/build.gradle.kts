@@ -22,8 +22,8 @@ android {
         applicationId = "dev.ic.timerlpe"
         minSdk = 33
         targetSdk = 37
-        versionCode = 211
-        versionName = "0.21.1"
+        versionCode = 212
+        versionName = "0.21.2"
         ndk {
             abiFilters.add("arm64-v8a")
         }
@@ -59,6 +59,14 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+    packaging {
+        jniLibs {
+            /* libextract.so is exec'd, not dlopen'd: it has to be extracted
+             * to nativeLibraryDir, which the installer only does in legacy
+             * packaging mode. */
+            useLegacyPackaging = true
+        }
     }
 }
 

@@ -31,3 +31,15 @@ To regenerate, use `tool/patch_aircompressor/PatchAircompressor.java` (ASM 9.7.1
 javac -cp asm-9.7.1.jar PatchAircompressor.java
 java -cp .:asm-9.7.1.jar PatchAircompressor aircompressor-0.27.jar aircompressor-0.27-android.jar
 ```
+
+## jniLibs/arm64-v8a/libextract.so
+
+Native `REPLACE_ZSTD` decoder used by `ZstdNative.kt`, taken from the
+ghostlock-app fork's `tools/extract_rs` build (Apache-2.0).  It is invoked as
+`libextract.so --zstd-decode <in> <out> <expected>` and links the Rust `zstd`
+crate, so full-OTA zstd payloads decode without any `sun.misc.Unsafe` call.
+
+`android.packaging.jniLibs.useLegacyPackaging = true` is required: the installer
+must extract it to `nativeLibraryDir` because it is executed, not dlopen'd.
+
+sha256: `4dfc536d5ae87347ab07df01ce477de57309246f0ee61a56ca1bc6146742c6c3`

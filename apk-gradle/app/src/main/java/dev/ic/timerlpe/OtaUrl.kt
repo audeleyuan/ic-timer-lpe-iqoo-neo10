@@ -145,8 +145,23 @@ object OtaUrlExtractor {
                                     ByteArrayInputStream(compressed)
                                 ).use { it.readBytes() }
                             OP_REPLACE_XZ -> XzDecoder.decode(compressed, expected.toInt())
-                            OP_REPLACE_ZSTD -> ByteArrayInputStream(compressed).use { bin ->
-                                io.airlift.compress.zstd.ZstdInputStream(bin).use { it.readBytes() }
+                            OP_REPLACE_ZSTD -> {
+                                /* Native decoder first: the Java zstd path needs
+                                 * sun.misc.Unsafe.copyMemory(Object,long,...),
+                                 * which Android 13+ no longer ships. */
+                                val exp = if (expected in 1..Int.MAX_VALUE.toLong()) {
+                                    expected.toInt()
+                                } else {
+                                    0
+                                }
+                                if (ZstdNative.available() && exp > 0) {
+                                    ZstdNative.decode(compressed, exp)
+                                } else {
+                                    ByteArrayInputStream(compressed).use { bin ->
+                                        io.airlift.compress.zstd.ZstdInputStream(bin)
+                                            .use { it.readBytes() }
+                                    }
+                                }
                             }
                             else -> compressed
                         }

@@ -289,15 +289,27 @@ internal object BootExtractor {
                 0 -> blob
                 14 -> {
                     if (isZstd(blob)) {
-                        val out = java.io.ByteArrayInputStream(blob).use { bin ->
-                            io.airlift.compress.zstd.ZstdInputStream(bin).use { it.readBytes() }
+                        val exp = if (extTotal in 1..Int.MAX_VALUE.toLong()) {
+                            extTotal.toInt()
+                        } else {
+                            0
                         }
-                        if (extTotal > 0 && out.size.toLong() < extTotal) {
-                            throw IllegalStateException(
-                                "zstd 解压不完整（${out.size}/$extTotal bytes），包可能损坏"
-                            )
+                        if (ZstdNative.available() && exp > 0) {
+                            /* Native zstd: no sun.misc.Unsafe, so this also
+                             * works on Android 13/16 where the Java decoder's
+                             * copyMemory(Object,long,...) overload is gone. */
+                            ZstdNative.decode(blob, exp)
+                        } else {
+                            val out = java.io.ByteArrayInputStream(blob).use { bin ->
+                                io.airlift.compress.zstd.ZstdInputStream(bin).use { it.readBytes() }
+                            }
+                            if (extTotal > 0 && out.size.toLong() < extTotal) {
+                                throw IllegalStateException(
+                                    "zstd 解压不完整（${out.size}/$extTotal bytes），包可能损坏"
+                                )
+                            }
+                            out
                         }
-                        out
                     } else {
                         blob
                     }
