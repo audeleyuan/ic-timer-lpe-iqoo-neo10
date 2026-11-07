@@ -106,6 +106,25 @@ static const struct ic_anchor_build ic_anchor_builds[] = {
         0xffffffc00831e6f0ULL, 0xffffffc008389904ULL, 0xffffffc0086424f4ULL, 0xffffffc0086131c4ULL, 0xffffffc0080b6494ULL, 0xffffffc008613fd0ULL, 0xffffffc00862e86cULL, 0xffffffc008321b1cULL, 0xffffffc008194f50ULL, 0xffffffc0081782f4ULL, 0xffffffc0081777acULL, 0xffffffc00a1a1e40ULL, 0xffffffc00816f388ULL, 0xffffffc008c1abb0ULL, 0xffffffc0080df7dcULL, 0xffffffc0081b52a8ULL, 0xffffffc0081b66bcULL, 0xffffffc0081b03e0ULL, 0xffffffc0084215c4ULL, 0xffffffc0084219d8ULL, 0xffffffc00847cf50ULL, 0xffffffc0090c9fbcULL, 0xffffffc0090bf180ULL, 0xffffffc008194f94ULL, 0xffffffc0090bf244ULL, 0xffffffc0090bf5c8ULL, 0xffffffc0090c0364ULL, 0xffffffc0090c045cULL, 0xffffffc0090c31f0ULL, 0xffffffc0090c37c4ULL, 0xffffffc0080e66acULL, 0xffffffc0080e5080ULL, 0xffffffc0080e5300ULL, 0xffffffc0080debc8ULL, 0xffffffc0080da200ULL, 0xffffffc0080da4e0ULL, 0xffffffc00856b374ULL, 0xffffffc0085625c4ULL, 0xffffffc00863337cULL, 0xffffffc0086126a0ULL, 0xffffffc0090cb374ULL, 0xffffffc008412970ULL, 0xffffffc008413204ULL, 0xffffffc0084134dcULL, 0xffffffc0084135f0ULL, 0xffffffc008dc866cULL, 0xffffffc008faf85cULL, 0xffffffc008f0bf44ULL, 0xffffffc0088a9cf4ULL, 0xffffffc008d02c0cULL, 0xffffffc008cf8e48ULL, 0xffffffc00843528cULL, 0xffffffc008433974ULL, 0xffffffc008433578ULL, 0xffffffc0080b7234ULL, 0xffffffc0083898e4ULL, 0xffffffc0083870b0ULL, 0xffffffc00831e628ULL, 0xffffffc00816f160ULL, 0xffffffc00873d348ULL, 0xffffffc0080d9958ULL, 0xffffffc0080da0a8ULL, 0xffffffc00a3cb2c0ULL, 0xffffffc00a5586a8ULL, 0xffffffc00a1f0f30ULL, 0xffffffc00a1f24f0ULL } },
     { "6.1.145-android14", "PD2425|V2425", "16.1.17.10", "ic_pd2425_1611710_links", {
         0xffffffc00831e09cULL, 0xffffffc008388674ULL, 0xffffffc00863fae0ULL, 0xffffffc0086107b0ULL, 0xffffffc0080b6494ULL, 0xffffffc0086115bcULL, 0xffffffc00862be58ULL, 0xffffffc0083214c8ULL, 0xffffffc008194e04ULL, 0xffffffc0081781a8ULL, 0xffffffc008177660ULL, 0xffffffc00a1a1e40ULL, 0xffffffc00816f23cULL, 0xffffffc008c18204ULL, 0xffffffc0080df6c0ULL, 0xffffffc0081b515cULL, 0xffffffc0081b6570ULL, 0xffffffc0081b0294ULL, 0xffffffc00841ebb0ULL, 0xffffffc00841efc4ULL, 0xffffffc00847a53cULL, 0xffffffc0090c757cULL, 0xffffffc0090bc740ULL, 0xffffffc008194e48ULL, 0xffffffc0090bc804ULL, 0xffffffc0090bcb88ULL, 0xffffffc0090bd924ULL, 0xffffffc0090bda1cULL, 0xffffffc0090c07b0ULL, 0xffffffc0090c0d84ULL, 0xffffffc0080e6590ULL, 0xffffffc0080e4f64ULL, 0xffffffc0080e51e4ULL, 0xffffffc0080deaacULL, 0xffffffc0080da0e4ULL, 0xffffffc0080da3c4ULL, 0xffffffc008568960ULL, 0xffffffc00855fbb0ULL, 0xffffffc008630968ULL, 0xffffffc00860fc8cULL, 0xffffffc0090c8934ULL, 0xffffffc00840ff5cULL, 0xffffffc0084107f0ULL, 0xffffffc008410ac8ULL, 0xffffffc008410bdcULL, 0xffffffc008dc5c5cULL, 0xffffffc008face4cULL, 0xffffffc008f09534ULL, 0xffffffc0088a72b4ULL, 0xffffffc008d00260ULL, 0xffffffc008cf649cULL, 0xffffffc008432878ULL, 0xffffffc008430f60ULL, 0xffffffc008430b64ULL, 0xffffffc0080b7234ULL, 0xffffffc008388654ULL, 0xffffffc008385e20ULL, 0xffffffc00831dfd4ULL, 0xffffffc00816f014ULL, 0xffffffc00873a8ecULL, 0xffffffc0080d983cULL, 0xffffffc0080d9f8cULL, 0xffffffc00a3cb180ULL, 0xffffffc00a558f40ULL, 0xffffffc00a1f0f30ULL, 0xffffffc00a1f24f0ULL } },
+    { "6.1.145-android14-11-maybe-dirty", "DPD2329|PD2329", "16.2.9.2", "ic_pd2329_16292_links", {
+        0xffffffc0082ff744ULL, 0xffffffc00836a9a4ULL, 0xffffffc008622dc8ULL, 0xffffffc0085f3a34ULL,
+        0xffffffc0080b5fc8ULL, 0xffffffc0085f4840ULL, 0xffffffc00860f140ULL, 0xffffffc008302b70ULL,
+        0xffffffc0081938d8ULL, 0xffffffc008176c58ULL, 0xffffffc008176110ULL, 0xffffffc00a0d1e40ULL,
+        0xffffffc00816de00ULL, 0xffffffc008bf9194ULL, 0xffffffc0080df298ULL, 0xffffffc0081b3a80ULL,
+        0xffffffc0081b4e94ULL, 0xffffffc0081aebb8ULL, 0xffffffc008402a04ULL, 0xffffffc008402e18ULL,
+        0xffffffc00845e3ecULL, 0xffffffc0090a2f38ULL, 0xffffffc009097df8ULL, 0xffffffc00819391cULL,
+        0xffffffc009097ebcULL, 0xffffffc009098240ULL, 0xffffffc009098fdcULL, 0xffffffc0090990d4ULL,
+        0xffffffc00909bee0ULL, 0xffffffc00909c4b4ULL, 0xffffffc0080e6168ULL, 0xffffffc0080e4b3cULL,
+        0xffffffc0080e4dbcULL, 0xffffffc0080de684ULL, 0xffffffc0080d9cbcULL, 0xffffffc0080d9f9cULL,
+        0xffffffc00854ca1cULL, 0xffffffc008543c6cULL, 0xffffffc008613c50ULL, 0xffffffc0085f2f10ULL,
+        0xffffffc0090a42f0ULL, 0xffffffc0083f3df0ULL, 0xffffffc0083f4684ULL, 0xffffffc0083f495cULL,
+        0xffffffc0083f4a70ULL, 0xffffffc008da13fcULL, 0xffffffc008f88448ULL, 0xffffffc008ee4be0ULL,
+        0xffffffc00888a55cULL, 0xffffffc008ce1638ULL, 0xffffffc008cd7874ULL, 0xffffffc0084166ccULL,
+        0xffffffc008414db4ULL, 0xffffffc0084149b8ULL, 0xffffffc0080b6d68ULL, 0xffffffc00836a984ULL,
+        0xffffffc008368148ULL, 0xffffffc0082ff67cULL, 0xffffffc00816dbd8ULL, 0xffffffc00871d238ULL,
+        0xffffffc0080d9414ULL, 0xffffffc0080d9b64ULL, 0xffffffc00a2f3780ULL, 0xffffffc00a47f310ULL,
+        0xffffffc00a120f30ULL, 0xffffffc00a1224f0ULL,
+    } },
 };
 
 #endif

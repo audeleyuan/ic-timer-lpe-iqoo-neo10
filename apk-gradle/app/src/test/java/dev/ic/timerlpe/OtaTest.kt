@@ -125,6 +125,7 @@ class OtaTest {
             )
             assertEquals("ANDROID!", String(buf, 0, 8, Charsets.US_ASCII))
             assertTrue("kernel size > 0", u32(buf, 8) > 0)
+            System.getenv("IC_OTA_OUT")?.let { File(it).writeBytes(buf) }
         } finally {
             img.delete()
             dir.delete()
