@@ -22,8 +22,8 @@ android {
         applicationId = "dev.ic.timerlpe"
         minSdk = 33
         targetSdk = 37
-        versionCode = 180
-        versionName = "0.18.0"
+        versionCode = 190
+        versionName = "0.19.0"
         ndk {
             abiFilters.add("arm64-v8a")
         }
@@ -69,6 +69,9 @@ dependencies {
      * decompressing OTA payload zstd chunks).  The field owner is rewritten to
      * dev.ic.timerlpe.UnsafeCompat; see libs/README.md. */
     implementation(files("libs/aircompressor-0.27-android.jar"))
+    /* bzip2 payload operations (OP_REPLACE_BZ); same library the reference
+     * ghostlock-app extractor uses. */
+    implementation("org.apache.commons:commons-compress:1.27.1")
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.compose.ui:ui")
