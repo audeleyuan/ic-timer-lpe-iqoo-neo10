@@ -509,8 +509,8 @@ class MainActivity : ComponentActivity() {
                                 )
                                 HorizontalDivider()
                                 ArrowPreference(
-                                    title = "清理 KSU",
-                                    summary = "删除 KSU 数据与本工具的临时文件",
+                                    title = "清理",
+                                    summary = "清理本工具临时文件 / 清理 KSU",
                                     onClick = { cleanup() },
                                     startAction = {
                                         Icon(
@@ -1317,9 +1317,36 @@ class MainActivity : ComponentActivity() {
         ""
     }
 
+    private fun managerInstalled(pkg: String): Boolean =
+        runCatching { packageManager.getPackageInfo(pkg, 0) }.isSuccess
+
+    private fun anyManagerInstalled(): Boolean =
+        KSU_PKGS.any { it.isNotEmpty() && managerInstalled(it) }
+
     private fun runCore() {
         val s = requireService("运行") ?: return
         val ksuPkg = KSU_PKGS[ksuIndex]
+        /* The endgame hands root to a manager's own ksud; without one there
+         * is nothing to hand off to, so ask before starting anything. */
+        if (ksuPkg.isNotEmpty()) {
+            if (!managerInstalled(ksuPkg)) {
+                notice = Notice(
+                    "未检测到 ROOT 管理器",
+                    "所选的管理器「${KSU_NAMES[ksuIndex]}」（$ksuPkg）没有安装。\n\n" +
+                        "请先安装对应的管理器 APK，或在「ROOT管理器」里改选「自动检测」。"
+                )
+                return
+            }
+        } else if (!anyManagerInstalled()) {
+            notice = Notice(
+                "未检测到 ROOT 管理器",
+                "没有检测到任何 KernelSU 系列管理器。\n\n" +
+                    "本工具在拿到 root 后要把 root 交给管理器（由管理器自己的内核模块" +
+                    "late-load 完成），所以需要先安装 KernelSU / KernelSU-Next / " +
+                    "SukiSU Ultra / BakaSU / SukiSU 等之一，再点一键越狱。"
+            )
+            return
+        }
         val safe = safeMode
         val stamp = (System.currentTimeMillis() / 1000).toString()
         val bin = "$TMP/ic-timer-a$stamp"
@@ -1721,7 +1748,32 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun cleanup() {
-        cleanupDialog = requireService("清理 KSU") ?: return
+        cleanupDialog = requireService("清理") ?: return
+    }
+
+    /** Deletes this tool's /data/local/tmp leftovers; works before any root. */
+    private fun doTempCleanup(s: IIcService) {
+        lifecycleScope.launch {
+            val out = withContext(Dispatchers.IO) {
+                runCatching {
+                    s.runCmd(
+                        "rm -f /data/local/tmp/ic-timer-a* /data/local/tmp/ic-lpe-a* " +
+                            "/data/local/tmp/ic-app-a* /data/local/tmp/ksu-h* " +
+                            "/data/local/tmp/ic-safe-h* /data/local/tmp/ic-syms-a* " +
+                            "/data/local/tmp/ic-boot-a* /data/local/tmp/ic-clean-a* " +
+                            "/data/local/tmp/ksu_stage.sh /data/local/tmp/ic-payload* 2>&1; " +
+                            "echo ---; ls -l /data/local/tmp/ 2>/dev/null | " +
+                            "grep -E 'ic-|ksu|payload' | head -20"
+                    )
+                }.getOrElse { "清理失败: $it" }
+            }
+            addLog("[清理] 本工具临时文件\n$out")
+            Toast.makeText(
+                this@MainActivity,
+                "已清理本工具临时文件",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
     }
 
     private var cleanupDialog by mutableStateOf<IIcService?>(null)
@@ -1731,27 +1783,39 @@ class MainActivity : ComponentActivity() {
         val s = cleanupDialog
         OverlayDialog(
             show = s != null,
-            title = "清理 KernelSU",
+            title = "清理",
             onDismissRequest = { cleanupDialog = null },
             content = {
                 Column(
                     modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 24.dp)
                 ) {
                     Text(
-                        "删除 /data/adb/ksu、/data/adb/modules、/data/adb/modules_update " +
-                            "等 KSU 数据与本工具的临时文件。已加载的内核模块要重启后才消失；" +
-                            "清理后请重启再提权。管理器 APK 默认保留。",
+                        "「清理本工具临时文件」删除 /data/local/tmp 里本工具运行时留下的" +
+                            "进程/脚本/日志副本，提权前就可以做，不影响已解析的 " +
+                            "ic-syms.txt。\n\n" +
+                            "「清理 KSU」删除 /data/adb/ksu、/data/adb/modules、" +
+                            "/data/adb/modules_update 等 KSU 数据。已加载的内核模块要重启后" +
+                            "才消失；清理后请重启再提权。管理器 APK 默认保留。",
                         fontSize = 13.sp
                     )
                     Spacer(Modifier.height(16.dp))
                     TextButton(
                         modifier = Modifier.fillMaxWidth(),
-                        text = "清理（保留管理器）",
+                        text = "清理本工具临时文件",
+                        onClick = {
+                            cleanupDialog = null
+                            s?.let { doTempCleanup(it) }
+                        },
+                        colors = ButtonDefaults.textButtonColorsPrimary()
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        text = "清理 KSU（保留管理器）",
                         onClick = {
                             cleanupDialog = null
                             s?.let { doCleanup(it, false) }
-                        },
-                        colors = ButtonDefaults.textButtonColorsPrimary()
+                        }
                     )
                     Spacer(Modifier.height(8.dp))
                     TextButton(
