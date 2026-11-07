@@ -873,7 +873,13 @@ static int boot_kernel(const unsigned char *file, size_t flen,
 		}
 	}
 	off = page;
-	if (!kernel_size || off + kernel_size > flen) {
+	if (!kernel_size) {
+		fprintf(stderr,
+			"[syms] image has no kernel (init_boot / vendor_boot?); "
+			"select the boot.img of this build\n");
+		return 0;
+	}
+	if (off + kernel_size > flen) {
 		fprintf(stderr, "[syms] bad boot kernel range (size=%u)\n",
 			kernel_size);
 		return 0;

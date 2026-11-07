@@ -15,8 +15,8 @@ android {
         applicationId = "dev.ic.timerlpe"
         minSdk = 33
         targetSdk = 37
-        versionCode = 135
-        versionName = "0.13.5"
+        versionCode = 140
+        versionName = "0.14.0"
         ndk {
             abiFilters.add("arm64-v8a")
         }
@@ -52,6 +52,8 @@ android {
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
+    implementation("io.airlift:aircompressor:0.27")
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.compose.ui:ui")

@@ -39,6 +39,12 @@ static const struct ic_extra_syms ic_extra_syms_tab[] = {
      * (tp=0xffffffc00a2f3600 matches). */
     { "ic_pd2324_links", 0xffffffc00a121108ULL, 0xffffffc00a1229b8ULL,
       0xffffffc00a122428ULL },
+
+    /* PD2352_A_16.2.17.0.W10 full OTA (20260821140727…); image banner
+     * 6.1.145-android14-11-maybe-dirty.  The three objects are exactly at
+     * the fixed deltas from init_user_ns (verified against the image). */
+    { "ic_pd2352_162170_links", 0xffffffc00a1f11c8ULL, 0xffffffc00a1f2a78ULL,
+      0xffffffc00a1f24e8ULL },
 };
 
 #endif /* IC_EXTRA_SYMS_H */

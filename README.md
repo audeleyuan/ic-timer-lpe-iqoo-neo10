@@ -49,6 +49,9 @@ POSIX CPU timer UAF（CVE-2026-98260）的 vivo/iQOO 6.1 提权工具：从 shel
   结束时短暂显示完成 / 失败；
 - 偏移预检：运行前先跑 `ic-timer info`（只读），当前 build 没有可用偏移时
   弹「缺少偏移」对话框，引导到「解析偏移」；
+- 解析偏移：识别 boot.img / 全量 OTA 包（zip64 + payload + zstd），自动提取
+  boot 分区并与当前设备、版本比对，不一致/init_boot/非 6.1.145 一律拒绝并给出
+  对话框说明；
 - 日志页实时滚动（清空按钮在标题栏）；关于页为源码 / 社群 / 问题反馈、
   赞赏码与开放源代码许可；
 - 后端替换为本站的 Shizuku 用户服务（`IcService` + `run_core.sh`），
@@ -66,6 +69,7 @@ POSIX CPU timer UAF（CVE-2026-98260）的 vivo/iQOO 6.1 提权工具：从 shel
 | PD2307 / PD2329 / V2307（iQOO 12） | 16.2.11、16.2.20.3、16.2.20.7、16.2.21.1 |
 | PD2417 / V2417（Z9 Turbo+） | 16.2.14.1 |
 | PD2324 / V2324A / V2324HA / V2324H / PD2324J（X100 系列） | 16.2.12.0、16.2.13.1 |
+| PD2352 / V2352 | 16.2.17.0 |
 
 列表内机型的提权与 KSU 交接都只需要内置数据；列表外的新 build 用 App 的
 「解析偏移」从 `boot.img` 生成 `/data/local/tmp/ic-syms.txt`。

@@ -2522,6 +2522,39 @@ static int read_syms_file(const char *path)
 
     if (!f)
         return 0;
+    /* A table parsed from another kernel build has link-time addresses that
+     * are wrong in a way that turns the UAF write into an arbitrary write.
+     * The file carries "# build=<Linux version>"; refuse the mismatch. */
+    {
+        char fbuild[192] = "";
+        char hline[256];
+
+        while (fgets(hline, sizeof(hline), f))
+        {
+            if (!strncmp(hline, "# build=", 8))
+            {
+                size_t l = strlen(hline + 8);
+
+                while (l && (hline[8 + l - 1] == '\n' ||
+                             hline[8 + l - 1] == '\r' ||
+                             hline[8 + l - 1] == ' '))
+                    l--;
+                if (l >= sizeof(fbuild))
+                    l = sizeof(fbuild) - 1;
+                memcpy(fbuild, hline + 8, l);
+                fbuild[l] = 0;
+                break;
+            }
+        }
+        if (fbuild[0] && !strstr(fbuild, "6.1.145"))
+        {
+            logf("[syms] %s build=%s is not 6.1.145; ignoring the table\n",
+                 path, fbuild);
+            fclose(f);
+            return 0;
+        }
+        rewind(f);
+    }
     while (fgets(line, sizeof(line), f))
     {
         char name[128];

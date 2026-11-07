@@ -132,7 +132,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
 import java.io.File
+import java.io.FileInputStream
 import java.io.InputStream
+import java.nio.channels.FileChannel
 
 private const val PROJECT_URL = "https://github.com/kzktor/ic-timer-lpe"
 private const val COMMUNITY_URL = "https://qm.qq.com/q/MBM9NcDXYy"
@@ -170,6 +172,7 @@ class MainActivity : ComponentActivity() {
     private var runStage by mutableStateOf("")
     private var runStageIndex = -1
     private var offsetPrompt by mutableStateOf<String?>(null)
+    private var notice by mutableStateOf<Notice?>(null)
 
     private var service: IIcService? = null
     private var logPath: String? = null
@@ -297,6 +300,7 @@ class MainActivity : ComponentActivity() {
                         }
                         CleanupDialog()
                         OffsetPromptDialog()
+                        NoticeDialog()
                         AnimatedVisibility(
                             visible = showManual,
                             enter = slideInHorizontally(tween(240)) { it } + fadeIn(tween(240)),
@@ -1415,59 +1419,201 @@ class MainActivity : ComponentActivity() {
         }.onFailure { addLog("[解析偏移] 无法打开文件选择器: $it") }
     }
 
+    /** Thrown when the picked file cannot be used; the message goes to a dialog. */
+    private class ParseAbort(message: String) : Exception(message)
+
+    private data class Notice(val title: String, val message: String)
+
     private fun parseSelected(uri: Uri) {
-        val s = service
-        if (s == null) {
-            addLog("服务未连接：先点“授权 Shizuku”")
-            return
-        }
+        val s = requireService("解析偏移") ?: return
+        val name = uri.lastPathSegment ?: "所选文件"
         runStage = ""
         busy = true
         lifecycleScope.launch {
-            val out = withContext(Dispatchers.IO) {
-                try {
-                    val stamp = (System.currentTimeMillis() / 1000).toString()
-                    val bin = "$TMP/ic-syms-a$stamp"
-                    val img = "$TMP/ic-boot-a$stamp.img"
-                    val syms = "$TMP/ic-syms.txt"
-                    s.truncate(bin)
-                    push(s, "ic-timer", bin)
-                    s.makeExec(bin)
-                    s.truncate(img)
-                    val input: InputStream = contentResolver.openInputStream(uri)
-                        ?: throw IllegalStateException("openInputStream returned null")
-                    var off = 0
-                    val buf = ByteArray(CHUNK)
-                    try {
-                        while (true) {
-                            val n = input.read(buf)
-                            if (n <= 0) break
-                            val chunk = if (n == buf.size) buf else buf.copyOf(n)
-                            s.put(img, off, chunk)
-                            off += n
-                        }
-                    } finally {
-                        input.close()
+            try {
+                val out = withContext(Dispatchers.IO) { runParse(s, uri, name) }
+                addLog("[解析偏移]\n$out")
+                if (!out.contains("parse_rc=0")) {
+                    val tail = out.lines().filter { it.isNotBlank() }.takeLast(14)
+                        .joinToString("\n")
+                    notice = Notice("解析失败", "没有生成符号表。\n\n$tail")
+                }
+            } catch (a: ParseAbort) {
+                addLog("[解析偏移] ${a.message}")
+                notice = Notice("无法解析", a.message ?: "未知错误")
+            } catch (t: Throwable) {
+                addLog("[解析偏移] 失败: $t")
+                notice = Notice("解析失败", "读取或解析所选文件时出错：\n$t")
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    private fun runParse(s: IIcService, uri: Uri, name: String): String {
+        val stamp = (System.currentTimeMillis() / 1000).toString()
+        val bin = "$TMP/ic-syms-a$stamp"
+        val img = "$TMP/ic-boot-a$stamp.img"
+        val syms = "$TMP/ic-syms.txt"
+        val log = StringBuilder()
+        fun note(l: String) {
+            log.append(l).append('\n')
+        }
+
+        s.truncate(bin)
+        push(s, "ic-timer", bin)
+        s.makeExec(bin)
+        s.truncate(img)
+
+        val pfd = contentResolver.openFileDescriptor(uri, "r")
+            ?: throw ParseAbort("无法打开所选文件（文件选择器没有返回可读句柄）")
+        val ch = FileInputStream(pfd.fileDescriptor).channel
+        try {
+            val size = ch.size()
+            val head = readAt(ch, 0, 8)
+            note("[解析] 文件: $name  $size bytes")
+            when {
+                head.size >= 4 && head[0] == 'P'.code.toByte() &&
+                    head[1] == 'K'.code.toByte() -> {
+                    note("[解析] 类型: ZIP（全量包）")
+                    extractFromZip(s, ch, size, img, ::note)
+                }
+                head.size >= 8 && String(head, 0, 8, Charsets.US_ASCII) == "ANDROID!" -> {
+                    val hdr = readAt(ch, 0, 64)
+                    val ksize = u32(hdr, 8)
+                    val hver = u32(hdr, 40)
+                    note("[解析] 类型: Android boot 镜像 v$hver，内核 $ksize bytes")
+                    if (ksize == 0L) {
+                        throw ParseAbort(
+                            "所选镜像是 init_boot / vendor_boot（不含内核），无法解析偏移。\n\n" +
+                                "请选择该机型固件里的 boot.img，或直接选全量 OTA 包。"
+                        )
                     }
-                    "已选择: ${uri.lastPathSegment} ($off bytes)\n" + s.runCmd(
-                        "ls -l $img 2>&1; $bin syms $img $syms 2>&1; " +
-                            "echo parse_rc=$?; sed -n '1,3p' $syms 2>/dev/null; rm -f $img"
-                    )
-                } catch (t: Throwable) {
-                    "解析失败: $t"
+                    if (size <= 64) throw ParseAbort("boot 镜像大小异常（$size bytes）")
+                    val pushed = pushChannel(s, img, ch, 0, size)
+                    note("[解析] 已推送 boot.img: $pushed bytes")
+                }
+                else -> throw ParseAbort(
+                    "无法识别的文件：请选择 boot.img（Android boot 镜像）" +
+                        "或全量 OTA 包（.zip）。\n\ninit_boot / vendor_boot / 其他镜像都不支持。"
+                )
+            }
+            val r = s.runCmd(
+                "ls -l $img 2>&1; $bin syms $img $syms 2>&1; " +
+                    "echo parse_rc=$?; sed -n '1,3p' $syms 2>/dev/null; rm -f $img"
+            )
+            note(r)
+            return log.toString()
+        } finally {
+            try {
+                ch.close()
+            } catch (_: Throwable) {
+            }
+            try {
+                pfd.close()
+            } catch (_: Throwable) {
+            }
+        }
+    }
+
+    private fun extractFromZip(
+        s: IIcService,
+        ch: FileChannel,
+        size: Long,
+        img: String,
+        note: (String) -> Unit,
+    ) {
+        val zip = ZipReader(ch, size)
+        val meta = zip.find("META-INF/com/android/metadata")
+        if (meta != null) {
+            val text = zip.readSmall(meta, 64 * 1024)?.toString(Charsets.UTF_8)
+            if (text != null) {
+                val kv = HashMap<String, String>()
+                text.lineSequence().forEach { line ->
+                    val i = line.indexOf('=')
+                    if (i > 0) kv[line.substring(0, i).trim()] = line.substring(i + 1).trim()
+                }
+                val pkgDev = kv["pre-device"].orEmpty()
+                val pkgVer = kv["post-version"].orEmpty()
+                note("[解析] 包信息: device=$pkgDev version=$pkgVer")
+                checkPackageMatch(pkgDev, pkgVer)
+            }
+        } else {
+            note("[解析] 包内没有 META-INF/com/android/metadata，跳过设备/版本校验")
+        }
+
+        val payload = zip.find("payload.bin")
+        val bootEntry = zip.find("boot.img") ?: zip.find("boot/boot.img")
+        when {
+            payload != null -> {
+                if (payload.method != 0) {
+                    throw ParseAbort("payload.bin 在 zip 里是压缩存储，手机端暂不支持；请用电脑的 tool/parse_offsets.py。")
+                }
+                note("[解析] payload.bin: ${payload.compressedSize} bytes @ ${payload.dataOffset}")
+                val plan = BootExtractor.manifest(ch, payload.dataOffset)
+                note("[解析] boot 分区: ${plan.size} bytes, ${plan.ops.size} ops, block=${plan.blockSize}")
+                BootExtractor.extract(ch, payload.dataOffset, plan, note) { off, bytes, from, len ->
+                    var done = 0
+                    while (done < len) {
+                        val n = minOf(CHUNK, len - done)
+                        s.put(img, (off + done).toInt(), bytes.copyOfRange(from + done, from + done + n))
+                        done += n
+                    }
                 }
             }
-            addLog("[解析偏移]\n$out")
-            if (out.contains("is not 6.1.145")) {
-                postUi {
-                    Toast.makeText(
-                        this@MainActivity,
-                        "内核不是 6.1.145，已拒绝生成符号表",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
+            bootEntry != null -> {
+                val pushed = pushEntry(s, img, zip, bootEntry)
+                note("[解析] 包内 boot.img: $pushed bytes")
             }
-            busy = false
+            else -> throw ParseAbort("这个 zip 里既没有 payload.bin 也没有 boot.img，不是可用的全量包。")
+        }
+    }
+
+    private fun checkPackageMatch(pkgDev: String, pkgVer: String) {
+        val devId = getSystemProperty("ro.product.device")
+        val model = getSystemProperty("ro.product.model")
+        val buildId = getSystemProperty("ro.build.display.id")
+        val deviceStr = listOf(devId, model, buildId).filter { it.isNotBlank() }.joinToString(" ")
+        val version = Regex("""\d+\.\d+\.\d+\.\d+""").find(pkgVer)?.value
+        val mismatch = when {
+            pkgDev.isNotEmpty() && !deviceStr.contains(pkgDev, ignoreCase = true) ->
+                "设备不匹配：这个包是 $pkgDev，当前设备是 $deviceStr"
+            version != null && !buildId.contains(version) ->
+                "版本不匹配：这个包是 $pkgVer，当前系统是 $buildId"
+            else -> null
+        }
+        if (mismatch != null) {
+            throw ParseAbort(
+                "$mismatch\n\n已拒绝生成偏移：用错版本的地址跑写原语会让写操作落到" +
+                    "错误的内核地址。请改用当前设备和版本对应的固件包 / boot.img。"
+            )
+        }
+        addLog("[解析] 设备/版本校验通过: $deviceStr")
+    }
+
+    private fun pushChannel(s: IIcService, dst: String, ch: FileChannel, start: Long, length: Long): Long {
+        var off = 0L
+        while (off < length) {
+            val want = minOf(CHUNK.toLong(), length - off).toInt()
+            val buf = readAt(ch, start + off, want)
+            if (buf.isEmpty()) break
+            s.put(dst, off.toInt(), buf)
+            off += buf.size
+        }
+        return off
+    }
+
+    private fun pushEntry(s: IIcService, dst: String, zip: ZipReader, e: ZipEntryInfo): Long {
+        zip.open(e).use { input ->
+            var off = 0L
+            val buf = ByteArray(CHUNK)
+            while (true) {
+                val n = input.read(buf)
+                if (n <= 0) break
+                s.put(dst, off.toInt(), if (n == buf.size) buf else buf.copyOf(n))
+                off += n
+            }
+            return off
         }
     }
 
@@ -1518,6 +1664,32 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxWidth(),
                         text = "取消",
                         onClick = { cleanupDialog = null }
+                    )
+                }
+            }
+        )
+    }
+
+    @Composable
+    private fun NoticeDialog() {
+        val n = notice
+        OverlayDialog(
+            show = n != null,
+            title = n?.title ?: "",
+            onDismissRequest = { notice = null },
+            content = {
+                Column(
+                    modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 24.dp)
+                ) {
+                    SelectionContainer {
+                        Text(n?.message ?: "", fontSize = 13.sp)
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    TextButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        text = "知道了",
+                        onClick = { notice = null },
+                        colors = ButtonDefaults.textButtonColorsPrimary()
                     )
                 }
             }
