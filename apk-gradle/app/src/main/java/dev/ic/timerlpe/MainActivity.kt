@@ -4,7 +4,6 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
-import android.app.AlertDialog
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -12,8 +11,6 @@ import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import android.provider.Settings
-import android.widget.EditText
-import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -108,6 +105,8 @@ import io.github.suqi8.coui.kmp.basic.IconButton
 import io.github.suqi8.coui.kmp.basic.NavigationBar
 import io.github.suqi8.coui.kmp.basic.NavigationBarItem
 import io.github.suqi8.coui.kmp.basic.Scaffold
+import io.github.suqi8.coui.kmp.basic.TextField
+import io.github.suqi8.coui.kmp.basic.TextFieldMode
 import io.github.suqi8.coui.kmp.basic.Text
 import io.github.suqi8.coui.kmp.basic.TextButton
 import io.github.suqi8.coui.kmp.basic.TopAppBar
@@ -176,6 +175,9 @@ class MainActivity : ComponentActivity() {
     private var runStageIndex = -1
     private var offsetPrompt by mutableStateOf<String?>(null)
     private var notice by mutableStateOf<Notice?>(null)
+    private var parseMenu by mutableStateOf(false)
+    private var otaUrlPrompt by mutableStateOf(false)
+    private var otaUrlText by mutableStateOf("")
     private var showDonate by mutableStateOf(false)
 
     private var service: IIcService? = null
@@ -307,6 +309,8 @@ class MainActivity : ComponentActivity() {
                         }
                         CleanupDialog()
                         OffsetPromptDialog()
+                        ParseMenuDialog()
+                        OtaUrlDialog()
                         NoticeDialog()
                         DonateDialog(show = showDonate, onDismiss = { showDonate = false })
                         AnimatedVisibility(
@@ -1518,51 +1522,114 @@ class MainActivity : ComponentActivity() {
 
     private fun parseOffsets() {
         requireService("解析偏移") ?: return
-        AlertDialog.Builder(this)
-            .setTitle("解析偏移")
-            .setItems(
-                arrayOf("从文件选择（boot.img / 全量包）", "从链接下载全量包")
-            ) { _, which ->
-                if (which == 0) {
-                    runCatching {
-                        parsePicker.launch(arrayOf("*/*"))
-                    }.onFailure {
-                        addLog("[解析偏移] 无法打开文件选择器：\n" + explainError(it, "打开文件选择器"))
-                    }
-                } else {
-                    promptOtaUrl()
-                }
-            }
-            .setNegativeButton("取消", null)
-            .show()
+        parseMenu = true
     }
 
-    private fun promptOtaUrl() {
-        val input = EditText(this).apply {
-            hint = "https://…/update.zip"
-            setSingleLine(true)
-            setText(prefs.getString("ota_url", ""))
-        }
-        val pad = (16 * resources.displayMetrics.density).toInt()
-        val box = FrameLayout(this).apply {
-            setPadding(pad, pad / 2, pad, 0)
-            addView(input)
-        }
-        AlertDialog.Builder(this)
-            .setTitle("全量包链接")
-            .setMessage("只下载 boot 分区，不会下载整个包。支持 zip / payload.bin 的 http(s) 链接。")
-            .setView(box)
-            .setPositiveButton("开始") { _, _ ->
-                val url = input.text.toString().trim()
-                if (!url.startsWith("http://", true) && !url.startsWith("https://", true)) {
-                    Toast.makeText(this, "请输入 http(s) 链接", Toast.LENGTH_LONG).show()
-                } else {
-                    prefs.edit().putString("ota_url", url).apply()
-                    parseFromUrl(url)
+    @Composable
+    private fun ParseMenuDialog() {
+        OverlayDialog(
+            show = parseMenu,
+            title = "解析偏移",
+            onDismissRequest = { parseMenu = false },
+            content = {
+                Column(
+                    modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 24.dp)
+                ) {
+                    Text(
+                        "从文件选择 boot.img / 全量包，或输入 OTA 链接只下载 boot 分区。",
+                        fontSize = 13.sp
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    TextButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        text = "从文件选择（boot.img / 全量包）",
+                        onClick = {
+                            parseMenu = false
+                            runCatching {
+                                parsePicker.launch(arrayOf("*/*"))
+                            }.onFailure {
+                                addLog(
+                                    "[解析偏移] 无法打开文件选择器：\n" +
+                                        explainError(it, "打开文件选择器")
+                                )
+                            }
+                        },
+                        colors = ButtonDefaults.textButtonColorsPrimary()
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        text = "从链接下载全量包",
+                        onClick = {
+                            parseMenu = false
+                            otaUrlText = prefs.getString("ota_url", "") ?: ""
+                            otaUrlPrompt = true
+                        }
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        text = "取消",
+                        onClick = { parseMenu = false }
+                    )
                 }
             }
-            .setNegativeButton("取消", null)
-            .show()
+        )
+    }
+
+    @Composable
+    private fun OtaUrlDialog() {
+        OverlayDialog(
+            show = otaUrlPrompt,
+            title = "全量包链接",
+            onDismissRequest = { otaUrlPrompt = false },
+            content = {
+                Column(
+                    modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 24.dp)
+                ) {
+                    Text(
+                        "粘贴 OTA 的 http(s) 链接。只下载 boot 分区，不会下载整个包。",
+                        fontSize = 13.sp
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    TextField(
+                        value = otaUrlText,
+                        onValueChange = { otaUrlText = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        backgroundMode = TextFieldMode.Rectangle,
+                        label = "OTA 链接",
+                        singleLine = true
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    TextButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        text = "开始",
+                        onClick = {
+                            val url = otaUrlText.trim()
+                            if (!url.startsWith("http://", true) &&
+                                !url.startsWith("https://", true)
+                            ) {
+                                Toast.makeText(
+                                    this@MainActivity, "请输入 http(s) 链接",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            } else {
+                                otaUrlPrompt = false
+                                prefs.edit().putString("ota_url", url).apply()
+                                parseFromUrl(url)
+                            }
+                        },
+                        colors = ButtonDefaults.textButtonColorsPrimary()
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(
+                        modifier = Modifier.fillMaxWidth(),
+                        text = "取消",
+                        onClick = { otaUrlPrompt = false }
+                    )
+                }
+            }
+        )
     }
 
     private fun parseFromUrl(url: String) {
@@ -2252,7 +2319,7 @@ class MainActivity : ComponentActivity() {
                 licenses = listOf(LicenseText("GPL-3.0", asset = "licenses/GPL-3.0.txt"))
             ),
             LicenseItem(
-                name = "YuKongA/ghostlock-app（全量包解压/解析参考）",
+                name = "YuKongA/ghostlock-app",
                 author = "YuKongA，Apache-2.0；本项目的全量包解压与 " +
                     "boot.img 提取代码参考此项目",
                 website = "https://github.com/YuKongA/ghostlock-app",
