@@ -65,6 +65,49 @@ class OtaTest {
         }
     }
 
+    @Test
+    fun urlExtractorMatchesLocalZip() {
+        val path = System.getenv("IC_OTA_ZIP") ?: return
+        val f = File(path)
+        assumeTrue("missing $path", f.exists())
+
+        val dir = java.nio.file.Files.createTempDirectory("ota-test").toFile()
+        val logs = StringBuilder()
+        val img = kotlinx.coroutines.runBlocking {
+            OtaUrlExtractor.extractBoot(f.absolutePath, dir) { logs.append(it).append('\n') }
+        }
+        try {
+            println(logs)
+            val buf = img.readBytes()
+            assertEquals("boot partition size", 100663296, buf.size)
+            assertEquals("ANDROID!", String(buf, 0, 8, Charsets.US_ASCII))
+            assertEquals("boot.img md5", "f0ade53909791eb77cfac23fdc24db69", md5(buf))
+        } finally {
+            img.delete()
+            dir.delete()
+        }
+    }
+
+    @Test
+    fun urlExtractorDownloadsBootOverHttp() {
+        val url = System.getenv("IC_OTA_URL") ?: return
+        val dir = java.nio.file.Files.createTempDirectory("ota-url").toFile()
+        val logs = StringBuilder()
+        val img = kotlinx.coroutines.runBlocking {
+            OtaUrlExtractor.extractBoot(url, dir) { logs.append(it).append('\n') }
+        }
+        try {
+            println(logs)
+            val buf = img.readBytes()
+            assertEquals("boot partition size", 100663296, buf.size)
+            assertEquals("ANDROID!", String(buf, 0, 8, Charsets.US_ASCII))
+            assertEquals("boot.img md5", "f0ade53909791eb77cfac23fdc24db69", md5(buf))
+        } finally {
+            img.delete()
+            dir.delete()
+        }
+    }
+
     private fun md5(b: ByteArray): String =
         MessageDigest.getInstance("MD5").digest(b).joinToString("") { "%02x".format(it) }
 }

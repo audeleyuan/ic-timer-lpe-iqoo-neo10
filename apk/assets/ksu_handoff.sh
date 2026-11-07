@@ -27,9 +27,13 @@
 PKG="$1"
 KMI="$2"
 SAFE="${3:-0}"
+CORE="${4:-0}"
 if [ "${KSU_SAFE_MODE:-0}" = "1" ]; then SAFE=1; fi
 TAG="[ksu]"
-say() { echo "$TAG $*"; }
+# /proc/uptime carries 0.01 s resolution and costs no extra process here;
+# the timestamp shows which handoff step actually dominates a run.
+now_s() { read -r _t _ < /proc/uptime 2>/dev/null && echo "$_t"; }
+say() { echo "$TAG [$(now_s)] $*"; }
 
 KNOWN="me.weishu.kernelsu com.sukisu.ultra org.bakasu.bakasu \
 com.resukisu.resukisu com.sakisu.sakisu com.sevenk.core \
@@ -58,13 +62,15 @@ fi
 # ---------------------------------------------------------------- helpers
 apk_of() {
 	p=$1
-	a=$(pm path "$p" 2>/dev/null | sed -n 's/^package://p' | head -n 1)
+	a=""
+	# /data/app glob first: no process spawn, and the handoff runs as root.
+	for d in /data/app/*/"$p"-*/; do
+		[ -d "$d" ] || continue
+		a=$(ls "$d"/*.apk 2>/dev/null | head -n 1)
+		[ -n "$a" ] && break
+	done
 	if [ -z "$a" ]; then
-		for d in /data/app/*/"$p"-*/; do
-			[ -d "$d" ] || continue
-			a=$(ls "$d"/*.apk 2>/dev/null | head -n 1)
-			[ -n "$a" ] && break
-		done
+		a=$(pm path "$p" 2>/dev/null | sed -n 's/^package://p' | head -n 1)
 	fi
 	[ -n "$a" ] && [ -f "$a" ] && echo "$a"
 }
@@ -130,6 +136,10 @@ find_fresh_ksud() {
 		chmod 755 "$stage.$p" 2>/dev/null
 		[ -x "$stage.$p" ] || continue
 		ver=$(timeout 5 "$stage.$p" --version 2>&1 | head -n 2 | tr '\n' ' ')
+		# --version already proves the payload; skip the extra help spawn.
+		case "$ver" in
+		*uapi*|*UAPI*) printf '%s\n' "$stage.$p"; return 0 ;;
+		esac
 		help=$(timeout 5 "$stage.$p" late-load --help 2>&1 | head -n 20)
 		case "$ver $help" in
 		*uapi*|*UAPI*|*late-load*|*--kmi*)
@@ -258,11 +268,15 @@ for p in $CANDS; do
 			say "  install rc=$rc (empty output)"
 		fi
 		wait_live 30
-		# Opening the manager lets its 越狱模式 page finish the userspace
-		# install when ksud alone cannot (seen on 7kimisu/ReSukiSU).
-		am force-stop "$p" 2>/dev/null
-		monkey -p "$p" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
-		say "  launched $p"
+		# The core (arg 4 = core) force-stops and launches the manager itself
+		# after it has verified the module and the init stages; launching here
+		# would only leave a dead-fd instance for that start to bring forward,
+		# and costs a force-stop + monkey round-trip on every run.
+		if [ "$CORE" != "1" ]; then
+			am force-stop "$p" 2>/dev/null
+			monkey -p "$p" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+			say "  launched $p"
+		fi
 	fi
 	if ksu_live; then
 		DONE=1

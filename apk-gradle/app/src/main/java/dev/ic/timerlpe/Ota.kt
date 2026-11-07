@@ -302,14 +302,32 @@ internal object BootExtractor {
                         blob
                     }
                 }
-                8 -> throw IllegalStateException(
-                    "该全量包的 boot 分区是 XZ 压缩，手机端暂不支持提取；" +
-                        "请用电脑的 tool/parse_offsets.py 生成符号表"
-                )
-                1 -> throw IllegalStateException(
-                    "该全量包的 boot 分区是 bzip2 压缩，手机端暂不支持提取；" +
-                        "请用电脑的 tool/parse_offsets.py 生成符号表"
-                )
+                8 -> {
+                    val maxOut = if (extTotal > 0 && extTotal <= Int.MAX_VALUE) {
+                        extTotal.toInt()
+                    } else {
+                        Int.MAX_VALUE
+                    }
+                    val out = XzDecoder.decode(blob, maxOut)
+                    if (extTotal > 0 && out.size.toLong() < extTotal) {
+                        throw IllegalStateException(
+                            "xz 解压不完整（${out.size}/$extTotal bytes），包可能损坏"
+                        )
+                    }
+                    out
+                }
+                1 -> {
+                    val out = java.io.ByteArrayInputStream(blob).use { bin ->
+                        org.apache.commons.compress.compressors.bzip2
+                            .BZip2CompressorInputStream(bin).use { it.readBytes() }
+                    }
+                    if (extTotal > 0 && out.size.toLong() < extTotal) {
+                        throw IllegalStateException(
+                            "bzip2 解压不完整（${out.size}/$extTotal bytes），包可能损坏"
+                        )
+                    }
+                    out
+                }
                 else -> throw IllegalStateException("不支持的 payload 操作类型 ${op.type}")
             }
             val exts = op.extents.ifEmpty {

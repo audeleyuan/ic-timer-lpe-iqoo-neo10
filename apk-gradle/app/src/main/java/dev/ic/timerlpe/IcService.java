@@ -211,6 +211,19 @@ public class IcService extends IIcService.Stub {
         }
     }
 
+    /* A panic or hard reboot loses data that f2fs has not checkpointed,
+     * which turned two attempt logs into files full of 0x00.  fsync every
+     * chunk: the stream is a few KB per run, so the cost is negligible and
+     * the last lines survive the reboot. */
+    private static void writeDurable(FileOutputStream out, byte[] b, int off, int len) {
+        try {
+            out.write(b, off, len);
+            out.flush();
+            out.getFD().sync();
+        } catch (IOException ignored) {
+        }
+    }
+
     /* The app polls the /data/local/tmp log by length, but the tester may
      * only be able to reach shared storage.  Pump stdout to both: the app log
      * and /sdcard/Download/<same name>.  Download is best-effort -- a device
@@ -248,19 +261,13 @@ public class IcService extends IIcService.Stub {
                         + (fd != null ? fd.getAbsolutePath() : "unavailable")
                         + "\n").getBytes(StandardCharsets.UTF_8);
 
-                app.write(note);
-                app.flush();
-                if (fdl != null) {
-                    fdl.write(note);
-                    fdl.flush();
-                }
+                writeDurable(app, note, 0, note.length);
+                if (fdl != null)
+                    writeDurable(fdl, note, 0, note.length);
                 while ((n = in.read(buf)) > 0) {
-                    app.write(buf, 0, n);
-                    app.flush();
-                    if (fdl != null) {
-                        fdl.write(buf, 0, n);
-                        fdl.flush();
-                    }
+                    writeDurable(app, buf, 0, n);
+                    if (fdl != null)
+                        writeDurable(fdl, buf, 0, n);
                 }
             } catch (IOException ignored) {
             } finally {

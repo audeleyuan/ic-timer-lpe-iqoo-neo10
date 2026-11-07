@@ -4,6 +4,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
+import android.app.AlertDialog
 import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
 import android.net.Uri
@@ -11,6 +12,8 @@ import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import android.provider.Settings
+import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -1404,7 +1407,7 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                     val payload =
-                        "sh $handoff '$ksuPkg' '' '${if (safe) "1" else "0"}' ; $proof"
+                        "sh $handoff '$ksuPkg' '' '${if (safe) "1" else "0"}' core ; $proof"
 
                     s.truncate(script)
                     push(s, SCHEME_ASSET, script)
@@ -1485,7 +1488,7 @@ class MainActivity : ComponentActivity() {
                     }
                 } catch (_: Throwable) {
                 }
-                delay(1000)
+                delay(300)
             }
             polling = false
         }
@@ -1515,9 +1518,141 @@ class MainActivity : ComponentActivity() {
 
     private fun parseOffsets() {
         requireService("解析偏移") ?: return
-        runCatching {
-            parsePicker.launch(arrayOf("*/*"))
-        }.onFailure { addLog("[解析偏移] 无法打开文件选择器：\n" + explainError(it, "打开文件选择器")) }
+        AlertDialog.Builder(this)
+            .setTitle("解析偏移")
+            .setItems(
+                arrayOf("从文件选择（boot.img / 全量包）", "从链接下载全量包")
+            ) { _, which ->
+                if (which == 0) {
+                    runCatching {
+                        parsePicker.launch(arrayOf("*/*"))
+                    }.onFailure {
+                        addLog("[解析偏移] 无法打开文件选择器：\n" + explainError(it, "打开文件选择器"))
+                    }
+                } else {
+                    promptOtaUrl()
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun promptOtaUrl() {
+        val input = EditText(this).apply {
+            hint = "https://…/update.zip"
+            setSingleLine(true)
+            setText(prefs.getString("ota_url", ""))
+        }
+        val pad = (16 * resources.displayMetrics.density).toInt()
+        val box = FrameLayout(this).apply {
+            setPadding(pad, pad / 2, pad, 0)
+            addView(input)
+        }
+        AlertDialog.Builder(this)
+            .setTitle("全量包链接")
+            .setMessage("只下载 boot 分区，不会下载整个包。支持 zip / payload.bin 的 http(s) 链接。")
+            .setView(box)
+            .setPositiveButton("开始") { _, _ ->
+                val url = input.text.toString().trim()
+                if (!url.startsWith("http://", true) && !url.startsWith("https://", true)) {
+                    Toast.makeText(this, "请输入 http(s) 链接", Toast.LENGTH_LONG).show()
+                } else {
+                    prefs.edit().putString("ota_url", url).apply()
+                    parseFromUrl(url)
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun parseFromUrl(url: String) {
+        val s = requireService("解析偏移") ?: return
+        runStage = ""
+        busy = true
+        lifecycleScope.launch {
+            val log = StringBuilder()
+            fun note(l: String) {
+                log.append(l).append('\n')
+                addLogOnMain(l)
+            }
+            try {
+                withContext(Dispatchers.IO) {
+                    note("[解析] 从链接提取 boot.img: $url")
+                    val file = OtaUrlExtractor.extractBoot(url, cacheDir, ::note)
+                    try {
+                        runParseFile(s, file, "boot.img（链接）", ::note)
+                    } finally {
+                        file.delete()
+                    }
+                }
+                val out = log.toString()
+                addLog("[解析偏移]\n$out")
+                if (!out.contains("parse_rc=0")) {
+                    val tail = out.lines().filter { it.isNotBlank() }.takeLast(14)
+                        .joinToString("\n")
+                    notice = Notice(
+                        "解析失败",
+                        "没有生成符号表（解析器返回非 0）。\n\n最后几行日志：\n$tail"
+                    )
+                }
+            } catch (a: ParseAbort) {
+                addLog("[解析偏移] ${a.message}")
+                notice = Notice("无法解析", a.message ?: "未知错误")
+            } catch (t: Throwable) {
+                val why = explainError(t, "从链接提取 boot.img")
+                addLog("[解析偏移] 失败：\n$why")
+                notice = Notice("解析失败", why)
+            } finally {
+                busy = false
+            }
+        }
+    }
+
+    /** Verifies and pushes an already-extracted boot.img, then runs the syms parser. */
+    private fun runParseFile(
+        s: IIcService,
+        file: File,
+        label: String,
+        note: (String) -> Unit,
+    ) {
+        parseStage = "解析已下载的 boot.img"
+        val stamp = (System.currentTimeMillis() / 1000).toString()
+        val bin = "$TMP/ic-syms-a$stamp"
+        val img = "$TMP/ic-boot-a$stamp.img"
+        val syms = "$TMP/ic-syms.txt"
+        s.truncate(bin)
+        push(s, "ic-timer", bin)
+        s.makeExec(bin)
+        s.truncate(img)
+        FileInputStream(file).use { fin ->
+            val ch = fin.channel
+            val size = ch.size()
+            val head = readAt(ch, 0, 8)
+            note("[解析] 文件: $label  $size bytes")
+            if (!(head.size >= 8 &&
+                    String(head, 0, 8, Charsets.US_ASCII) == "ANDROID!")) {
+                throw ParseAbort("从链接提取出来的不是 Android boot 镜像（没有 ANDROID! 头）。")
+            }
+            val hdr = readAt(ch, 0, 64)
+            val ksize = u32(hdr, 8)
+            val hver = u32(hdr, 40)
+            note("[解析] 类型: Android boot 镜像 v$hver，内核 $ksize bytes")
+            if (ksize == 0L) {
+                throw ParseAbort(
+                    "提取到的是 init_boot / vendor_boot（不含内核），无法解析偏移。"
+                )
+            }
+            checkBootIdentity(ch, size, note)
+            val pushed = pushChannel(s, img, ch, 0, size)
+            note("[解析] 已推送 boot.img: $pushed bytes")
+        }
+        parseStage = "生成符号表"
+        note(
+            s.runCmd(
+                "ls -l $img 2>&1; $bin syms $img $syms 2>&1; " +
+                    "echo parse_rc=$?; sed -n '1,3p' $syms 2>/dev/null; rm -f $img"
+            )
+        )
     }
 
     /** Thrown when the picked file cannot be used; the message goes to a dialog. */
@@ -2065,7 +2200,7 @@ class MainActivity : ComponentActivity() {
     private companion object {
         private const val REQ_SHIZUKU = 1001
         private const val TMP = "/data/local/tmp"
-        private const val CHUNK = 128 * 1024
+        private const val CHUNK = 256 * 1024
         private const val ATTEMPTS = 16
         private const val MAX_LOG_LINES = 20_000
         private const val DEFAULT_CMD =
@@ -2115,6 +2250,15 @@ class MainActivity : ComponentActivity() {
                 author = "kzktor/ic-timer-lpe，作者酷安@散花神木",
                 website = PROJECT_URL,
                 licenses = listOf(LicenseText("GPL-3.0", asset = "licenses/GPL-3.0.txt"))
+            ),
+            LicenseItem(
+                name = "YuKongA/ghostlock-app（全量包解压/解析参考）",
+                author = "YuKongA，Apache-2.0；本项目的全量包解压与 " +
+                    "boot.img 提取代码参考此项目",
+                website = "https://github.com/YuKongA/ghostlock-app",
+                licenses = listOf(
+                    LicenseText("Apache-2.0", asset = "licenses/Apache-2.0.txt")
+                )
             ),
             LicenseItem(
                 name = "molanp/CVE-2026-98260-vivo-s60-poc",
