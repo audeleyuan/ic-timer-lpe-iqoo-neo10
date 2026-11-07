@@ -1892,8 +1892,11 @@ class MainActivity : ComponentActivity() {
         if (imgFp != null && devFp != null) {
             note("[解析] boot 指纹: $imgFpStr")
             note("[解析] 本机指纹: $devFpStr")
+            /* Same build = same vendor and same build number.  The product
+             * token may legitimately differ by a hardware suffix (the package
+             * says PD2339 while the device reports PD2339M); requiring it made
+             * a correct image fail. */
             val same = imgFp.vendor.equals(devFp.vendor, ignoreCase = true) &&
-                imgFp.device.equals(devFp.device, ignoreCase = true) &&
                 imgFp.incremental == devFp.incremental
             if (!same) {
                 throw ParseAbort(
