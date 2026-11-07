@@ -71,6 +71,13 @@ public final class UnsafeCompat {
         return (int) (offset - ARRAY_BYTE_BASE_OFFSET);
     }
 
+    /* Upstream Unsafe access is unchecked: the zstd decoder reads a few bytes
+     * past the logical end of its input buffer (harmless heap padding on a
+     * real Unsafe).  Emulate that with zero bytes instead of throwing. */
+    private static int at(byte[] b, int i) {
+        return (i >= 0 && i < b.length) ? (b[i] & 0xFF) : 0;
+    }
+
     private static Object call(Method m, Object... args) {
         if (m == null) throw new IllegalStateException("unsupported Unsafe call");
         try {
@@ -82,7 +89,7 @@ public final class UnsafeCompat {
 
     // ---- reads -------------------------------------------------------
     public static byte getByte(Object u, Object base, long off) {
-        if (base instanceof byte[]) return ((byte[]) base)[idx(off)];
+        if (base instanceof byte[]) return (byte) at((byte[]) base, idx(off));
         return (Byte) call(M_GET_BYTE, base, off);
     }
 
@@ -90,7 +97,7 @@ public final class UnsafeCompat {
         if (base instanceof byte[]) {
             byte[] b = (byte[]) base;
             int i = idx(off);
-            return (short) ((b[i] & 0xFF) | ((b[i + 1] & 0xFF) << 8));
+            return (short) (at(b, i) | (at(b, i + 1) << 8));
         }
         return (Short) call(M_GET_SHORT, base, off);
     }
@@ -99,8 +106,8 @@ public final class UnsafeCompat {
         if (base instanceof byte[]) {
             byte[] b = (byte[]) base;
             int i = idx(off);
-            return (b[i] & 0xFF) | ((b[i + 1] & 0xFF) << 8)
-                    | ((b[i + 2] & 0xFF) << 16) | ((b[i + 3] & 0xFF) << 24);
+            return at(b, i) | (at(b, i + 1) << 8)
+                    | (at(b, i + 2) << 16) | (at(b, i + 3) << 24);
         }
         return (Integer) call(M_GET_INT, base, off);
     }
@@ -109,19 +116,23 @@ public final class UnsafeCompat {
         if (base instanceof byte[]) {
             byte[] b = (byte[]) base;
             int i = idx(off);
-            long lo = (b[i] & 0xFFL) | ((b[i + 1] & 0xFFL) << 8)
-                    | ((b[i + 2] & 0xFFL) << 16) | ((b[i + 3] & 0xFFL) << 24);
-            long hi = (b[i + 4] & 0xFFL) | ((b[i + 5] & 0xFFL) << 8)
-                    | ((b[i + 6] & 0xFFL) << 16) | ((b[i + 7] & 0xFFL) << 24);
+            long lo = at(b, i) | (at(b, i + 1) << 8)
+                    | (at(b, i + 2) << 16) | ((long) at(b, i + 3) << 24);
+            long hi = at(b, i + 4) | (at(b, i + 5) << 8)
+                    | (at(b, i + 6) << 16) | ((long) at(b, i + 7) << 24);
             return lo | (hi << 32);
         }
         return (Long) call(M_GET_LONG, base, off);
     }
 
     // ---- writes ------------------------------------------------------
+    private static void set(byte[] b, int i, int v) {
+        if (i >= 0 && i < b.length) b[i] = (byte) v;
+    }
+
     public static void putByte(Object u, Object base, long off, byte v) {
         if (base instanceof byte[]) {
-            ((byte[]) base)[idx(off)] = v;
+            set((byte[]) base, idx(off), v);
             return;
         }
         call(M_PUT_BYTE, base, off, v);
@@ -131,8 +142,8 @@ public final class UnsafeCompat {
         if (base instanceof byte[]) {
             byte[] b = (byte[]) base;
             int i = idx(off);
-            b[i] = (byte) v;
-            b[i + 1] = (byte) (v >>> 8);
+            set(b, i, v);
+            set(b, i + 1, v >>> 8);
             return;
         }
         call(M_PUT_SHORT, base, off, v);
@@ -142,10 +153,10 @@ public final class UnsafeCompat {
         if (base instanceof byte[]) {
             byte[] b = (byte[]) base;
             int i = idx(off);
-            b[i] = (byte) v;
-            b[i + 1] = (byte) (v >>> 8);
-            b[i + 2] = (byte) (v >>> 16);
-            b[i + 3] = (byte) (v >>> 24);
+            set(b, i, v);
+            set(b, i + 1, v >>> 8);
+            set(b, i + 2, v >>> 16);
+            set(b, i + 3, v >>> 24);
             return;
         }
         call(M_PUT_INT, base, off, v);
@@ -155,14 +166,14 @@ public final class UnsafeCompat {
         if (base instanceof byte[]) {
             byte[] b = (byte[]) base;
             int i = idx(off);
-            b[i] = (byte) v;
-            b[i + 1] = (byte) (v >>> 8);
-            b[i + 2] = (byte) (v >>> 16);
-            b[i + 3] = (byte) (v >>> 24);
-            b[i + 4] = (byte) (v >>> 32);
-            b[i + 5] = (byte) (v >>> 40);
-            b[i + 6] = (byte) (v >>> 48);
-            b[i + 7] = (byte) (v >>> 56);
+            set(b, i, (int) v);
+            set(b, i + 1, (int) (v >>> 8));
+            set(b, i + 2, (int) (v >>> 16));
+            set(b, i + 3, (int) (v >>> 24));
+            set(b, i + 4, (int) (v >>> 32));
+            set(b, i + 5, (int) (v >>> 40));
+            set(b, i + 6, (int) (v >>> 48));
+            set(b, i + 7, (int) (v >>> 56));
             return;
         }
         call(M_PUT_LONG, base, off, v);
@@ -171,7 +182,14 @@ public final class UnsafeCompat {
     public static void copyMemory(Object u, Object srcBase, long srcOff,
                                   Object dstBase, long dstOff, long len) {
         if (srcBase instanceof byte[] && dstBase instanceof byte[]) {
-            System.arraycopy(srcBase, idx(srcOff), dstBase, idx(dstOff), (int) len);
+            byte[] src = (byte[]) srcBase;
+            byte[] dst = (byte[]) dstBase;
+            int si = idx(srcOff);
+            int di = idx(dstOff);
+            for (int k = 0; k < len; k++) {
+                int v = at(src, si + k);
+                set(dst, di + k, v);
+            }
             return;
         }
         if (srcBase == null && dstBase == null) {
