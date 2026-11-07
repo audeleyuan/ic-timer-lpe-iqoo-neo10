@@ -3,7 +3,7 @@ name: build-apk
 on:
   workflow_dispatch:
   push:
-    branches: [ refactor-98260 ]
+    branches: [ main ]
     tags: [ 'v*' ]
 
 permissions:
