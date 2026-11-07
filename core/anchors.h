@@ -125,6 +125,25 @@ static const struct ic_anchor_build ic_anchor_builds[] = {
         0xffffffc0080d9414ULL, 0xffffffc0080d9b64ULL, 0xffffffc00a2f3780ULL, 0xffffffc00a47f310ULL,
         0xffffffc00a120f30ULL, 0xffffffc00a1224f0ULL,
     } },
+    { "6.1.145-android14-11-maybe-dirty", "PD2339|V2339", "16.2.13.1", "ic_pd2339_162131_links", {
+        0xffffffc0082ffcacULL, 0xffffffc00836af0cULL, 0xffffffc008623430ULL, 0xffffffc0085f409cULL,
+        0xffffffc0080b5fc8ULL, 0xffffffc0085f4ea8ULL, 0xffffffc00860f7a8ULL, 0xffffffc0083030d8ULL,
+        0xffffffc0081936e0ULL, 0xffffffc008176a60ULL, 0xffffffc008175f18ULL, 0xffffffc00a0d1e40ULL,
+        0xffffffc00816dc08ULL, 0xffffffc008bf9684ULL, 0xffffffc0080df2b4ULL, 0xffffffc0081b3888ULL,
+        0xffffffc0081b4c9cULL, 0xffffffc0081ae9c0ULL, 0xffffffc00840306cULL, 0xffffffc008403480ULL,
+        0xffffffc00845ea54ULL, 0xffffffc0090a22f8ULL, 0xffffffc0090971b8ULL, 0xffffffc008193724ULL,
+        0xffffffc00909727cULL, 0xffffffc009097600ULL, 0xffffffc00909839cULL, 0xffffffc009098494ULL,
+        0xffffffc00909b2a0ULL, 0xffffffc00909b874ULL, 0xffffffc0080e6184ULL, 0xffffffc0080e4b58ULL,
+        0xffffffc0080e4dd8ULL, 0xffffffc0080de6a0ULL, 0xffffffc0080d9cbcULL, 0xffffffc0080d9f9cULL,
+        0xffffffc00854d084ULL, 0xffffffc0085442d4ULL, 0xffffffc0086142b8ULL, 0xffffffc0085f3578ULL,
+        0xffffffc0090a36b0ULL, 0xffffffc0083f4458ULL, 0xffffffc0083f4cecULL, 0xffffffc0083f4fc4ULL,
+        0xffffffc0083f50d8ULL, 0xffffffc008da07ecULL, 0xffffffc008f87838ULL, 0xffffffc008ee3fd0ULL,
+        0xffffffc00888ab7cULL, 0xffffffc008ce1b28ULL, 0xffffffc008cd7d64ULL, 0xffffffc008416d34ULL,
+        0xffffffc00841541cULL, 0xffffffc008415020ULL, 0xffffffc0080b6d68ULL, 0xffffffc00836aeecULL,
+        0xffffffc0083686b0ULL, 0xffffffc0082ffbe4ULL, 0xffffffc00816d9e0ULL, 0xffffffc00871d858ULL,
+        0xffffffc0080d9414ULL, 0xffffffc0080d9b64ULL, 0xffffffc00a2f3680ULL, 0xffffffc00a47f298ULL,
+        0xffffffc00a120e70ULL, 0xffffffc00a122430ULL,
+    } },
 };
 
 #endif

@@ -72,6 +72,7 @@ POSIX CPU timer UAF（CVE-2026-98260）的 vivo/iQOO 6.1 提权工具：从 shel
 | PD2352 / V2352 | 16.2.17.0 |
 | PD2425 / V2425 | 16.1.17.10 |
 | DPD2329 / PD2329 | 16.2.9.2 |
+| PD2339 / V2339 | 16.2.13.1 |
 
 列表内机型的提权与 KSU 交接都只需要内置数据；列表外的新 build 用 App 的
 「解析偏移」从 `boot.img` 生成 `/data/local/tmp/ic-syms.txt`。
