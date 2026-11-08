@@ -1,3 +1,9 @@
 # Shell scripts are pushed to Android and executed by mksh: they must keep LF
 # endings even on Windows checkouts with core.autocrlf=true.
 *.sh text eol=lf
+
+# 二进制文件不做行尾转换
+*.apk binary
+*.jpg binary
+*.png binary
+*.so binary

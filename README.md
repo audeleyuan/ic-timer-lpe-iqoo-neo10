@@ -1,130 +1,134 @@
-# IC Timer LPE —— CVE-2026-98260
+# IC Timer LPE —— iQOO Neo 10 实测通过版（预编译 APK）
 
-POSIX CPU timer UAF（CVE-2026-98260）的 vivo/iQOO 6.1 提权工具：从 shell 域
-拿到 uid 0，并可把 root 交给 KernelSU 系列管理器（late-load 管理器自带的
-`ksud` / 内核模块）。
+> ## ⚠️ 这不是原作者仓库
+>
+> 本仓库是 **[kzktor/ic-timer-lpe](https://github.com/kzktor/ic-timer-lpe)** 的 **fork / 镜像**，
+> 只做两件事：**提供我编译好的 APK 供直接下载**，以及**记录在一台 iQOO Neo 10 上的成功实测**。
+>
+> **代码、思路、偏移表全部来自原作者，本人没有任何原创贡献。**
+>
+> - 原作者：**kzktor** —— <https://github.com/kzktor/ic-timer-lpe>
+> - 作者酷安：**@散花神木**
+> - 许可证：**GNU GPL-3.0**（见 [`LICENSE`](LICENSE)、[`NOTICE`](NOTICE)）
+>
+> 一切荣誉归原作者。若本仓库与上游有任何出入，**以上游为准**。
+> 如果这个工具对你有用，请去上游点 Star，而不是这里。
 
-> 仅供学习使用，请下载后24内删除。如设备出现任何问题，概不负责。
-> 本软件免费开源，作者酷安 **@散花神木**
+---
 
-## 0.12 做了什么
+## 这是什么
 
-旧版把每台机器/每个 build 的偏移、喷页几何、slide 方式都写死在主文件里，
-一个内核改动就要重新编译。0.12 拆成：
+`IC Timer LPE` 是针对 **CVE-2026-98260**（POSIX CPU timer 释放后使用，UAF）的提权工具，
+适用于 **vivo / iQOO 6.1.145 内核**机型：从 shell 域拿到 uid 0，并可把 root 交给
+**KernelSU** 系列管理器（late-load 管理器自带的 `ksud` / 内核模块）。
 
-| 模块 | 作用 |
+它是一个 **Shizuku 用户服务** APK：root 动作跑在 Shizuku 提供的 shell 身份下，不依赖
+已 root 环境 bootstrap。
+
+## 实测记录：iQOO Neo 10（成功 ✅)
+
+| 项目 | 值 |
 | --- | --- |
-| `core/profiles.h` | 每内核常量（静态地址、分配调用点 low21、cred 字段偏移、slab 几何），`-DIC_PROFILE_*` 选择 |
-| `core/anchors.h` | 旧工具 9 个 build 的 anchor 表（生成：`core/tools/gen_anchors.py`） |
-| `core/extra_syms.h` | fake-cred 需要的对象符号（镜像抽取 + 从 `init_user_ns` 推导） |
-| `core/timer98260.c` | 主体：trace oracle → cred 泄漏 → 喷页 → 命中回读 → 写原语 → shell / KSU 终局 |
-| `core/ic_syms.c` | 手机端「解析偏移」：boot.img / Image / vmlinux / System.map → 符号表 |
-| `harness/qemu_core_init.c` | 本地 QEMU 最小 init（proc/sys/dev/tracefs，可 root 或 uid 2000） |
-| `apk/` | Shizuku 用户服务 APK（`run_core.sh` 启动 core） |
+| 机型 | iQOO Neo 10（V2425A / PD2425） |
+| 内核 | `6.1.145-android14-11-maybe-dirty` |
+| 系统指纹 | `vivo/PD2425/PD2425:16/BP2A.250605.031.A3_V000L1/compiler260917174806:user/release-keys` |
+| 提权结果 | 成功，shell 域 uid 0 |
+| ROOT 管理器 | KernelSU **v3.3.1 (32680-5)**，`工作中 [越狱模式]`，LKM 模式 |
+| SELinux | 强制（Enforcing），未关闭 |
+| Seccomp | 过滤模式 |
+| 测试日期 | 2026-11-08 |
 
-关键设计：
+<table>
+<tr>
+<td width="50%"><img src="screenshots/01-kernelsu-working.jpg" alt="KernelSU 工作中"></td>
+<td width="50%"><img src="screenshots/02-app-shizuku-connected.jpg" alt="IC Timer LPE 界面"></td>
+</tr>
+<tr>
+<td align="center">KernelSU 已接管，LKM 模式工作正常</td>
+<td align="center">Shizuku 已连接，可一键越狱</td>
+</tr>
+</table>
 
-- **slide 从 timer 调用点推导**：6.1 的 `do_timer_create` 在镜像里偏移
-  < 2 MiB，KASLR slide 按 2 MiB 对齐，所以调用点低 21 位就是链接偏移，
-  `slide = site0 - (0xffffffc008000000 + low21)`，不需要 kallsyms；
-- **de-tag 地址** = 表里的 `__tracepoint_sys_exit` link + slide（优先
-  kallsyms，可读时直接用绝对地址）；
-- **fake-cred 对象符号**：`root_user / init_ucounts / init_groups` 在
-  16.1/16.2 各 build 上相对 `init_user_ns` 的偏移固定
-  （`+0x298 / +0x1b48 / +0x15b8`），由内置表的 `init_user_ns` 推导；
-- **写后校验**：shell 路径回读 `/proc/<child>/status` 的 Uid，fake 路径用
-  peek 协议让 child 自报 `getuid()/geteuid()`，未命中就重发（≤8 次）。
+也就是说：在上述 build 上**不需要**从 `boot.img` 解析偏移，`PD2425 / V2425`
+的内置偏移表直接命中。
 
-## 0.13 做了什么
+## 下载
 
-界面从手写 framework View 换成 **移植 Shark 的 Jetpack Compose 界面**
-（[Yunnijian/Shark](https://github.com/Yunnijian/Shark)，GPL-3.0）：
+**推荐从 [Releases](../../releases) 下载**，那里是正式发布的附件：
 
-- 工程切到 Gradle + Kotlin + Compose（`apk-gradle/`，旧 `apk/` 保留作参照）；
-- 底部三页：首页 / 日志 / 关于，沿用 Shark 的 `COUITheme`、`Scaffold`、
-  `AnimatedContent`、模糊标题栏与卡片组件；
-- 首页：状态卡、一键越狱、ROOT 管理器下拉、安全模式开关、使用手册入口、
-  解析偏移 / 清理 KSU / 诊断、设备信息卡；使用手册是独立入口，点开是全屏页；
-- 运行进度：点「一键越狱」后主按钮显示阶段（`7/12 零写 vr.ko` 之类），
-  结束时短暂显示完成 / 失败；
-- 偏移预检：运行前先跑 `ic-timer info`（只读），当前 build 没有可用偏移时
-  弹「缺少偏移」对话框，引导到「解析偏移」；
-- 解析偏移：识别 boot.img / 全量 OTA 包（zip64 + payload + zstd），自动提取
-  boot 分区并与当前设备、版本比对，不一致/init_boot/非 6.1.145 一律拒绝并给出
-  对话框说明；
-- 日志页实时滚动（清空按钮在标题栏）；关于页为源码 / 社群 / 问题反馈、
-  赞赏码与开放源代码许可；
-- 后端替换为本站的 Shizuku 用户服务（`IcService` + `run_core.sh`），
-  `IC_SYMS_FILE` / `IC_SAFE_MODE` / `IC_KSU` 行为与 0.12 一致。
+- [`apk/ic-timer-lpe-0.21.4.apk`](apk/ic-timer-lpe-0.21.4.apk) —— 仓库内也存了一份，方便直连
 
-移植自 Shark 的界面代码使本项目整体按 **GPL-3.0** 分发，见 `LICENSE` 与
-`NOTICE`。
-
-## 支持机型（内置偏移，机型 + 版本匹配）
-
-| 机型 | 版本 |
+| 项 | 值 |
 | --- | --- |
-| PD2506 / V2506（Y500） | 16.1.15.0、16.1.13.2、16.1.17.0 |
-| PD2516 / V2516（Y500 Pro） | 16.1.11.0 |
-| PD2307 / PD2329 / V2307（iQOO 12） | 16.2.11、16.2.20.3、16.2.20.7、16.2.21.1 |
-| PD2417 / V2417（Z9 Turbo+） | 16.2.14.1 |
-| PD2324 / V2324A / V2324HA / V2324H / PD2324J（X100 系列） | 16.2.12.0、16.2.13.1 |
-| PD2352 / V2352 | 16.2.17.0 |
-| PD2425 / V2425 | 16.1.17.10、16.1.16.2 |
-| DPD2329 / PD2329 | 16.2.9.2 |
-| PD2339 / V2339 | 16.2.13.1 |
-| PD2309 / V2309 | 16.2.15.0 |
-| PD2445 / V2445 | 16.1.16.0 |
+| 版本 | 0.21.4（versionCode 214） |
+| 包名 | `dev.ic.timerlpe` |
+| 大小 | 5,525,228 字节（约 5.27 MiB） |
+| SHA-256 | `365deb9c7ac6a7487c1033cc7445cb1447d5428820421aef80d27e91e5ed00ec` |
+| minSdk / targetSdk | 33 / 37 |
+| ABI | `arm64-v8a` 仅此一个 |
 
-列表内机型的提权与 KSU 交接都只需要内置数据；列表外的新 build 用 App 的
-「解析偏移」从 `boot.img` 生成 `/data/local/tmp/ic-syms.txt`。
-
-已内置表与旧工具解析结果（`dist/ic-syms-*.txt`）的交叉核对脚本：
-`core/tools/verify_tables.py`。
-
-## 用法
-
-- 包：`ipe/ic-timer-<ver>/ic-timer-lpe-<ver>.apk`（Shizuku 用户服务，需用
-  adb / 无线调试启动 Shizuku，不能用 root 启动）；
-- 每次完整运行前重启手机；fake 链中途失败留下的 zombie 不能 kill -9；
-- 不选 KSU：shell 域 uid 0 + 证明命令；
-- 选 KSU 管理器：fake-cred 全 caps root → `ksu_handoff.sh`（`ksu` 模式）。
-
-## 构建
+校验：
 
 ```sh
-core/build.sh /tmp/t98260 qemu_iqoo12     # NDK r27, API 29（API 24 的 TLS
-                                          # 对齐会被 bionic 拒绝）
-cp core/out/qemu_iqoo12/ic-timer apk-gradle/app/src/main/assets/ic-timer
-cd apk-gradle && ./gradlew :app:assembleRelease   # AGP 9.4.1 / Kotlin 2.4.20
+sha256sum ic-timer-lpe-0.21.4.apk
+# Windows: certutil -hashfile ic-timer-lpe-0.21.4.apk SHA256
 ```
 
-`apk/`（javac + framework View）是 0.12 及以前的手工构建，留作参照。
+> **签名说明：** 这个 APK 是我用**自己生成的证书**签的（`CN=ic-timer-lpe`，V2 签名），
+> **不是**上游作者的原签名。因此：
+> - 无法覆盖安装包名相同的其他构建，需要先卸载旧版本；
+> - 与上游/他人的构建不共享 `sharedUserId` 之外的任何信任关系，属正常现象。
 
-`core/tools/gen_anchors.py <Image>` 从内核镜像生成/更新 anchor 表；
-`core/tools/verify_tables.py core/anchors.h dist/` 做交叉核对。
+## 使用步骤
 
-## 验证
+1. **重启手机**。每次完整运行前都要重启，上一次失败残留的 zombie 不能 `kill -9`。
+2. 用 **adb / 无线调试** 启动 Shizuku（**不能用 root 启动**）。App 内「Shizuku 已连接」即就绪。
+3. 打开 `IC Timer LPE`，在 **ROOT 管理器** 下拉里选 **KernelSU**（只想验证提权就留空，走 shell 路径）。
+4. 点 **一键越狱**，按钮上会显示阶段（如 `7/12 零写 vr.ko`）。
+5. 结束后回到 KernelSU 确认「工作中」。
 
-- QEMU（iQOO 12 6.1.145 镜像）：shell 路径 `ROOT_SHELL_OK`；fake 路径
-  `uid=0 euid=0` + payload 执行；
-- 真机：PD2329 / PD2307 / PD2425 shell 域 uid 0；PD2425 `late-load rc=0`、
-  kernelsu 模块 resident。
+更详细的规则、支持机型与常见问题，请用 App 内 **使用手册** 入口，或直接看上游 README。
 
 ## 已知限制
 
-- 真机文件系统布局、不同 build 的 `struct cred` 偏移按已知 build 推导，未
-  实测的 build 失败时表现为 `fork/exec errno=12`（ENOMEM），不会 panic；
-- 本分支仅适用于 6.1.145 内核的机型。
+- 仅适用于 **6.1.145 内核**的 vivo / iQOO 机型；其他内核不要尝试。
+- 仅 `arm64-v8a`，`minSdk 33`。
+- 内置偏移表未覆盖的 build，需要先用 App 的 **解析偏移**（从 `boot.img` / 全量 OTA 提取）
+  生成 `/data/local/tmp/ic-syms.txt`。
+- 未实测的 build 失败时通常表现为 `fork/exec errno=12`（ENOMEM），一般不会 panic，
+  但**不保证**。
 
-## 免责声明
+## 我怎么编译的
 
-本工具仅供**安全研究与自有设备测试**使用。使用前请确认你对目标设备拥有
-合法授权；严禁用于未授权设备或任何非法用途。
+代码零改动，产物即上游 `main` 分支（`apk-gradle/`）的 `assembleRelease`：
+
+```sh
+cd apk-gradle
+./gradlew :app:assembleRelease -Pic.keystore=<你的 keystore>
+```
+
+- JDK 21.0.2 / Gradle 9.7.1 / AGP 9.4.1 / Kotlin 2.4.20
+- compileSdk 37，build-tools 37.0.0
+- `assets/ic-timer` 直接使用仓库内的预编译二进制（未重编 native core）
+- 签名用自签名 keystore（alias `ic`）
+
+详见 [`BUILD.md`](BUILD.md)。
+
+## 免责声明（照抄上游，请务必读）
+
+本工具仅供 **安全研究与自有设备测试** 使用。使用前请确认你对目标设备拥有合法授权；
+严禁用于未授权设备或任何非法用途。
 
 - 本软件按“现状”提供，不提供任何明示或暗示的担保；
-- 提权过程涉及内核写原语，可能导致设备重启、数据损坏甚至变砖；运行前请
-  自行备份，并确认具备恢复手段（原厂 boot.img / 完整 OTA）；
-- 使用本工具产生的一切后果由使用者自行承担，作者与贡献者不承担任何直接
-  或间接责任；
+- 提权过程涉及内核写原语，可能导致设备重启、数据损坏甚至变砖；运行前请自行备份，
+  并确认具备恢复手段（原厂 `boot.img` / 完整 OTA）；
+- 使用本工具产生的一切后果由使用者自行承担，原作者、贡献者与本镜像仓库均不承担
+  任何直接或间接责任；
 - 请遵守当地法律法规以及设备厂商的用户协议。
+
+**仅供学习使用，请下载后 24 小时内删除。如设备出现任何问题，概不负责。**
+
+## 许可证
+
+本仓库内容（含预编译 APK）按 **GNU GPL-3.0** 分发，与上游一致。
+对应源码见本仓库（fork 自上游）及 <https://github.com/kzktor/ic-timer-lpe>。
